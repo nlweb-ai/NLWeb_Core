@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nlweb-models"
+version = "0.5.0"
+description = "Model provider bundle for NLWeb - includes all LLM and embedding providers"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "Microsoft Corporation"}
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "nlweb-core>=0.5.0",
+    # OpenAI (used by multiple providers)
+    "openai>=1.12.0",
+    # Anthropic
+    "anthropic>=0.18.1",
+    # Google Gemini
+    "google-cloud-aiplatform>=1.38.0",
+    # Azure (uses openai package)
+    "azure-identity>=1.12.0",
+    # HuggingFace
+    "huggingface_hub>=0.31.0",
+    # Snowflake
+    "httpx>=0.28.1",
+    # Ollama
+    "aiohttp>=3.8.0",
+    # Inception
+    # aiohttp already included above
+    # Elasticsearch embedding
+    "elasticsearch[async]>=8,<9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/microsoft/NLWeb_Core"
+Repository = "https://github.com/microsoft/NLWeb_Core"
+Issues = "https://github.com/microsoft/NLWeb_Core/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["nlweb_models*"]

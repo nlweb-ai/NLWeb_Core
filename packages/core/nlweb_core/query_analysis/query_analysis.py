@@ -1,0 +1,199 @@
+
+# Copyright (c) 2025 Microsoft Corporation.
+# Licensed under the MIT License
+
+"""
+Query analysis handler that dynamically loads and executes enabled query analysis modules.
+
+WARNING: This code is under development and may undergo changes in future releases.
+Backwards compatibility is not guaranteed at this time.
+"""
+
+from xml.etree import ElementTree as ET
+import asyncio
+import importlib
+import os
+import json
+import re
+from nlweb_core.utils import fill_prompt_variables
+
+# Load query_analysis.xml once at module level
+query_analysis_tree = None
+
+
+def read_xml_file(file_path):
+    try:
+        return ET.parse(file_path).getroot()
+    except Exception as e:
+        raise
+
+# Initialize on module load
+try:
+    query_analysis_tree = read_xml_file("query_analysis.xml")
+    decontextualizer_tree = read_xml_file("decontextualizer.xml")
+except Exception as e:
+    pass
+
+
+class QueryAnalysisHandler:
+    """
+    Handler that executes enabled query analysis modules in parallel.
+
+    Each enabled QueryAnalysis node in the XML configuration is dynamically loaded,
+    instantiated, and executed asynchronously. Results are stored in the results
+    dictionary with the ref attribute as the key.
+    """
+
+    def __init__(self, nlweb_handler):
+        """Initialize the handler with an empty results dictionary."""
+        self.results = {}
+        self.nlweb_handler = nlweb_handler
+        self.done = False
+
+    async def do(self):
+        """
+        Execute all enabled query analysis modules in parallel.
+
+        This method:
+        1. Reads the query_analysis.xml tree
+        2. Finds all enabled QueryAnalysis nodes
+        3. Dynamically imports the class specified in the ref attribute from the module in method field
+        4. Creates instances passing self as the handler
+        5. Executes their do() methods in parallel
+        6. Collects results in self.results dictionary
+        """
+        global query_analysis_tree
+
+        if query_analysis_tree is None:
+            return
+
+        # Create tasks as we iterate through enabled QueryAnalysis nodes
+        tasks = []
+
+        for node in query_analysis_tree.findall('.//QueryAnalysis'):
+            enabled = node.get('enabled', 'false').lower() == 'true'
+            ref = node.get('ref')
+
+            if enabled and ref:
+                try:
+                    # Get the method child element
+                    method_node = node.find('method')
+                    if method_node is None or not method_node.text:
+                        self.results[ref] = {"error": "No method element found in XML"}
+                        continue
+
+                    module_name = method_node.text.strip()
+
+                    # Special case for defaultQueryAnalysisHandler
+                    if module_name == 'defaultQueryAnalysisHandler':
+                        instance = DefaultQueryAnalysisHandler(self, self.nlweb_handler, node)
+                    else:
+                        # For other handlers, import from the specified module
+                        full_module_name = f'nlweb_core.query_analysis.{module_name}'
+                        class_name = ref
+
+                        module = importlib.import_module(full_module_name)
+                        analysis_class = getattr(module, class_name)
+
+                        # Create instance passing self as handler and the XML node
+                        instance = analysis_class(self, node)
+
+                    # Create task for async execution
+                    task = asyncio.create_task(self._execute_analysis(ref, instance))
+                    tasks.append(task)
+
+                except (ImportError, AttributeError) as e:
+                    self.results[ref] = {"error": str(e)}
+
+        # Execute all tasks in parallel and update results as they complete
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Mark as done
+        self.done = True
+
+    async def _execute_analysis(self, ref, instance):
+        """Execute a single analysis and store the result."""
+        try:
+            result = await instance.do()
+            self.results[ref] = result
+        except Exception as e:
+            self.results[ref] = {"error": str(e)}
+
+
+class DefaultQueryAnalysisHandler:
+    """
+    Default handler for query analysis that extracts prompt and response structure
+    from XML, performs variable substitution, and calls the LLM.
+    """
+
+    def __init__(self, nlweb_handler, xml_node=None, prompt_ref=None, root_node=query_analysis_tree):
+        """
+        Initialize with a QueryAnalysisHandler instance and XML node.
+
+        Args:
+            handler: The QueryAnalysisHandler instance that contains the results dict
+            xml_node: The XML QueryAnalysis node with promptString and returnStruc
+        """
+        self.handler = nlweb_handler
+        if prompt_ref is None and xml_node is None:
+            raise ValueError("Both prompt_ref and xml_node cannot be None. One must be provided.")
+        if xml_node is None:
+            # Try to find the xml_node from the handler's query_analysis_tree using prompt_ref
+            tree = getattr(self.handler, 'query_analysis_tree', None)
+            if tree is not None and prompt_ref is not None:
+                for node in tree.findall('.//QueryAnalysis'):
+                    ref = node.get('ref')
+                    if ref == prompt_ref:
+                        xml_node = node
+                        break
+            if xml_node is None:
+                raise ValueError("Could not find xml_node for given prompt_ref.")
+        self.xml_node = xml_node
+
+    async def do(self):
+        """
+        Execute the default query analysis:
+        1. Extract promptString and returnStruc from XML node
+        2. Substitute variables in the prompt
+        3. Call ask_llm
+        4. Return the result
+        """
+        # Extract promptString
+        prompt_node = self.xml_node.find('promptString')
+        if prompt_node is None or not prompt_node.text:
+            return {"error": "No promptString found in XML"}
+
+        prompt_str = prompt_node.text.strip()
+
+        # Extract returnStruc
+        return_struc_node = self.xml_node.find('returnStruc')
+        if return_struc_node is None or not return_struc_node.text:
+            return {"error": "No returnStruc found in XML"}
+
+        # Parse the returnStruc JSON
+        try:
+            return_struc_text = return_struc_node.text.strip()
+            return_struc = json.loads(return_struc_text)
+        except json.JSONDecodeError as e:
+            return {"error": f"Invalid JSON in returnStruc: {e}"}
+
+        # Substitute variables in the prompt using handler's query_params
+        filled_prompt = fill_prompt_variables(prompt_str, self.handler.query_params)
+
+        # Call the LLM
+        try:
+            from nlweb_core.llm import ask_llm
+            result = await ask_llm(
+                filled_prompt,
+                return_struc,
+                level="low",
+                timeout=8,
+                query_params=getattr(self.handler, 'query_params', None)
+            )
+            return result
+        except Exception as e:
+            return {"error": f"LLM call failed: {e}"}
+
+def decontextualizeQuery(nlweb_handler, ref):
+    DefaultQueryAnalysisHandler(nlweb_handler, prompt_ref=ref, root_node=decontextualizer_tree).do()

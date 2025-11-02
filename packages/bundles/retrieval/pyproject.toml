@@ -1,0 +1,71 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nlweb-retrieval"
+version = "0.5.0"
+description = "Retrieval provider bundle for NLWeb - includes all vector database and search providers"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "Microsoft Corporation"}
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "nlweb-core>=0.5.0",
+    # Azure AI Search
+    "azure-core",
+    "azure-search-documents>=11.4.0",
+    "azure-identity>=1.12.0",
+    # Milvus
+    "pymilvus>=1.1.0",
+    "numpy",
+    # OpenSearch
+    "httpx>=0.28.1",
+    # Qdrant
+    "qdrant-client>=1.14.0",
+    # Snowflake Cortex Search
+    # httpx already included above
+    # Elasticsearch
+    "elasticsearch[async]>=8,<9",
+    # PostgreSQL/pgvector
+    "psycopg[binary]>=3.1.12",
+    "psycopg[pool]>=3.2.0",
+    "pgvector>=0.4.0",
+    # Shopify MCP
+    "aiohttp>=3.8.0",
+    # Cloudflare AutoRAG
+    "cloudflare>=4.3.1",
+    "zon>=3.0.0",
+    "markdown>=3.8.2",
+    "beautifulsoup4>=4.13.4",
+    # Bing Search
+    # httpx and aiohttp already included above
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/microsoft/NLWeb_Core"
+Repository = "https://github.com/microsoft/NLWeb_Core"
+Issues = "https://github.com/microsoft/NLWeb_Core/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["nlweb_retrieval*"]

@@ -1,17 +1,41 @@
 [build-system]
-requires = ["setuptools>=45", "wheel"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "nlweb-core"
 version = "0.1.0"
-description = "NLWeb Core library"
+description = "NLWeb Core library for building natural language web applications with vector database retrieval and LLM-based ranking"
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "Microsoft Corporation"}
+]
+keywords = ["nlp", "llm", "vector-database", "rag", "retrieval", "azure", "openai", "search"]
 classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
+]
+dependencies = [
+    "aiohttp>=3.8.0",
+    "pyyaml>=6.0",
+    "python-dotenv>=0.19.0",
+    "azure-search-documents>=11.4.0",
+    "azure-identity>=1.12.0",
+    "azure-core>=1.26.0",
+    "openai>=1.12.0",
 ]
 
 [project.optional-dependencies]
@@ -20,3 +44,42 @@ dev = [
     "black>=22.0",
     "flake8>=4.0",
 ]
+anthropic = ["anthropic>=0.18.0"]
+gemini = ["google-generativeai>=0.3.0"]
+huggingface = ["huggingface_hub>=0.31.0"]
+ollama = ["ollama>=0.5.1"]
+qdrant = ["qdrant-client>=1.7.0"]
+elasticsearch = ["elasticsearch>=8.0.0"]
+opensearch = ["opensearch-py>=2.0.0"]
+postgres = ["psycopg2-binary>=2.9.0"]
+milvus = ["pymilvus>=2.3.0"]
+snowflake = ["httpx>=0.28.1"]
+cors = ["aiohttp-cors>=0.7.0"]
+all = [
+    "anthropic>=0.18.0",
+    "google-generativeai>=0.3.0",
+    "huggingface_hub>=0.31.0",
+    "ollama>=0.5.1",
+    "qdrant-client>=1.7.0",
+    "elasticsearch>=8.0.0",
+    "opensearch-py>=2.0.0",
+    "psycopg2-binary>=2.9.0",
+    "pymilvus>=2.3.0",
+    "httpx>=0.28.1",
+    "aiohttp-cors>=0.7.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/NLWeb_Core"
+Documentation = "https://github.com/yourusername/NLWeb_Core/blob/main/README.md"
+Repository = "https://github.com/yourusername/NLWeb_Core"
+"Bug Tracker" = "https://github.com/yourusername/NLWeb_Core/issues"
+
+[project.scripts]
+nlweb-server = "nlweb_core.simple_server:main"
+
+[tool.setuptools.packages.find]
+include = ["nlweb_core*"]
+
+[tool.setuptools.package-data]
+nlweb_core = ["config/*.yaml", "config/*.xml", "config/*.txt", "config/*.json"]

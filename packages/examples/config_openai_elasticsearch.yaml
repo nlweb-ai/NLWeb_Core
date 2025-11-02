@@ -1,0 +1,26 @@
+# Example configuration for OpenAI + Elasticsearch
+# Install: pip install nlweb-core nlweb-retrieval nlweb-models
+
+llm:
+  provider: openai
+  import_path: nlweb_models.llm.openai
+  class_name: provider
+  api_key_env: OPENAI_API_KEY
+  models:
+    high: gpt-4
+    low: gpt-3.5-turbo
+
+embedding:
+  provider: openai
+  import_path: nlweb_models.embedding.openai_embedding
+  class_name: get_openai_embeddings
+  api_key_env: OPENAI_API_KEY
+  model: text-embedding-3-small
+
+retrieval:
+  provider: elasticsearch
+  import_path: nlweb_retrieval.elasticsearch_client
+  class_name: ElasticsearchClient
+  api_endpoint_env: ELASTICSEARCH_URL
+  index_name: my_index
+  use_knn: true
