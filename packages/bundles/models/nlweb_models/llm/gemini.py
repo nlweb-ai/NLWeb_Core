@@ -20,7 +20,7 @@ from google import genai
 from nlweb_core.config import CONFIG
 import threading
 
-from nlweb_core.llm_provider import LLMProvider
+from nlweb_core.llm import LLMProvider
 
 # Suppress verbose AFC logging from Google GenAI
 logging.getLogger("google_genai.models").setLevel(logging.WARNING)

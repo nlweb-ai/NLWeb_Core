@@ -20,7 +20,7 @@ from nlweb_core.config import CONFIG
 import threading
 
 
-from nlweb_core.llm_provider import LLMProvider
+from nlweb_core.llm import LLMProvider
 
 
 

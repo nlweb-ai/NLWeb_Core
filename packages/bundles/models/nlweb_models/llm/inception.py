@@ -17,7 +17,7 @@ import asyncio
 import threading
 from typing import Dict, Any, Optional
 
-from nlweb_core.llm_provider import LLMProvider
+from nlweb_core.llm import LLMProvider
 
 
 class ConfigurationError(RuntimeError):

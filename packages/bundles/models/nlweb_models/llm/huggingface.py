@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 from nlweb_core.config import CONFIG
 
 from huggingface_hub import AsyncInferenceClient
-from nlweb_core.llm_provider import LLMProvider
+from nlweb_core.llm import LLMProvider
 
 
 

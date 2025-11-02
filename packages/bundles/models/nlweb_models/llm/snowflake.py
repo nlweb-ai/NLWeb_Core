@@ -20,7 +20,7 @@ import httpx
 from typing import Dict, Any, List, Optional
 
 from nlweb_core.config import CONFIG
-from nlweb_core.llm_provider import LLMProvider
+from nlweb_core.llm import LLMProvider
 from nlweb_retrieval.utils import snowflake
 
 logger = logging.getLogger(__name__)

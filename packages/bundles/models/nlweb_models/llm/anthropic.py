@@ -19,7 +19,7 @@ from anthropic import AsyncAnthropic
 from nlweb_core.config import CONFIG
 import threading
 
-from nlweb_core.llm_provider import LLMProvider
+from nlweb_core.llm import LLMProvider
 
 logger = logging.getLogger(__name__)
 
