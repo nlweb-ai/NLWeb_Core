@@ -19,10 +19,9 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-# Import NLWeb core
+# Import NLWeb
 import nlweb_core
-from nlweb_core.simple_server import create_app
-from aiohttp import web
+from nlweb_network.server import main as run_server
 
 
 def main():
@@ -104,9 +103,8 @@ def main():
     print("=" * 70)
     print()
 
-    # Create and run the app
-    app = create_app()
-    web.run_app(app, host=host, port=port, print=lambda x: None)  # Suppress aiohttp's own startup message
+    # Start the NLWeb network server
+    run_server()
 
 
 if __name__ == "__main__":
