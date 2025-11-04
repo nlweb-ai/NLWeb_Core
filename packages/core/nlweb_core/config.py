@@ -285,18 +285,19 @@ class AppConfig:
             self.write_endpoint = None
 
         # Set defaults for other configs (not in unified format yet)
-        self.port = 8080
-        self.static_directory = "./static"
-        self.mode = "production"
-        self.homepage = "static/index.html"
-        self.nlweb_gateway = "nlwm.azurewebsites.net"
+        self.port = config.get('port', 8080)
+        self.static_directory = config.get('static_directory', "./static")
+        self.mode = config.get('mode', "production")
+        self.homepage = config.get('homepage', "static/index.html")
+        self.nlweb_gateway = config.get('nlweb_gateway', "nlwm.azurewebsites.net")
 
         # Server config defaults
+        server_cfg = config.get('server', {})
         self.server = ServerConfig(
-            host="localhost",
-            enable_cors=True,
-            max_connections=100,
-            timeout=30,
+            host=server_cfg.get('host', "localhost"),
+            enable_cors=server_cfg.get('enable_cors', True),
+            max_connections=server_cfg.get('max_connections', 100),
+            timeout=server_cfg.get('timeout', 30),
             ssl=SSLConfig(enabled=False),
             logging=LoggingConfig(level="info", file="./logs/webserver.log"),
             static=StaticConfig(enable_cache=True, cache_max_age=3600, gzip_enabled=True)
