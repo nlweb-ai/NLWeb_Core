@@ -15,6 +15,17 @@ from typing import List, Dict, Any, Optional
 from azure.core.credentials import AzureKeyCredential
 from azure.identity import DefaultAzureCredential
 from azure.search.documents import SearchClient
+from azure.search.documents.indexes import SearchIndexClient
+from azure.search.documents.indexes.models import (
+    SearchIndex,
+    SearchField,
+    SearchFieldDataType,
+    SimpleField,
+    SearchableField,
+    VectorSearch,
+    HnswAlgorithmConfiguration,
+    VectorSearchProfile,
+)
 
 # Import the writer interface - but handle case where nlweb_dataload isn't installed
 try:
@@ -85,6 +96,15 @@ class AzureSearchWriter(VectorDBWriterInterface):
                 f"Use 'api_key' or 'azure_ad'"
             )
 
+    def _get_credential(self):
+        """Get Azure credential based on authentication method."""
+        if self.auth_method == "azure_ad":
+            return DefaultAzureCredential()
+        elif self.auth_method == "api_key":
+            return AzureKeyCredential(self.api_key)
+        else:
+            raise ValueError(f"Unsupported authentication method: {self.auth_method}")
+
     def _get_search_client(self, index_name: Optional[str] = None) -> SearchClient:
         """
         Get the Azure AI Search client for a specific index.
@@ -96,20 +116,83 @@ class AzureSearchWriter(VectorDBWriterInterface):
             SearchClient: The Azure Search client for the specified index
         """
         index_name = index_name or self.default_index_name
-
-        # Create credential based on authentication method
-        if self.auth_method == "azure_ad":
-            credential = DefaultAzureCredential()
-        elif self.auth_method == "api_key":
-            credential = AzureKeyCredential(self.api_key)
-        else:
-            raise ValueError(f"Unsupported authentication method: {self.auth_method}")
+        credential = self._get_credential()
 
         return SearchClient(
             endpoint=self.api_endpoint,
             index_name=index_name,
             credential=credential
         )
+
+    def _get_index_client(self) -> SearchIndexClient:
+        """Get the Azure AI Search index management client."""
+        credential = self._get_credential()
+        return SearchIndexClient(endpoint=self.api_endpoint, credential=credential)
+
+    async def _ensure_index_exists(self, index_name: str, vector_dimensions: int = 1536):
+        """
+        Ensure the index exists, creating it if necessary.
+
+        Args:
+            index_name: Name of the index
+            vector_dimensions: Dimension of the embedding vectors (default: 1536 for text-embedding-3-small)
+        """
+        index_client = self._get_index_client()
+
+        def check_index():
+            try:
+                index_client.get_index(index_name)
+                return True
+            except Exception:
+                return False
+
+        exists = await asyncio.get_event_loop().run_in_executor(None, check_index)
+
+        if exists:
+            return
+
+        # Create index with vector search configuration
+        print(f"[AZURE_SEARCH_WRITER] Creating index '{index_name}' with vector dimension {vector_dimensions}")
+
+        fields = [
+            SimpleField(name="id", type=SearchFieldDataType.String, key=True),
+            SearchableField(name="url", type=SearchFieldDataType.String),
+            SearchableField(name="name", type=SearchFieldDataType.String),
+            SimpleField(name="site", type=SearchFieldDataType.String, filterable=True),
+            SearchableField(name="schema_json", type=SearchFieldDataType.String),
+            SearchField(
+                name="embedding",
+                type=SearchFieldDataType.Collection(SearchFieldDataType.Single),
+                searchable=True,
+                vector_search_dimensions=vector_dimensions,
+                vector_search_profile_name="default-profile",
+            ),
+        ]
+
+        # Configure vector search
+        vector_search = VectorSearch(
+            algorithms=[
+                HnswAlgorithmConfiguration(name="default-hnsw")
+            ],
+            profiles=[
+                VectorSearchProfile(
+                    name="default-profile",
+                    algorithm_configuration_name="default-hnsw",
+                )
+            ],
+        )
+
+        index = SearchIndex(
+            name=index_name,
+            fields=fields,
+            vector_search=vector_search
+        )
+
+        def create_index():
+            return index_client.create_index(index)
+
+        await asyncio.get_event_loop().run_in_executor(None, create_index)
+        print(f"[AZURE_SEARCH_WRITER] Index '{index_name}' created successfully")
 
     def _generate_document_id(self, url: str, site: str) -> str:
         """
@@ -150,6 +233,13 @@ class AzureSearchWriter(VectorDBWriterInterface):
             Dict with upload results
         """
         index_name = index_name or self.default_index_name
+
+        # Ensure index exists (create if necessary)
+        if documents:
+            # Determine vector dimensions from first document's embedding
+            vector_dimensions = len(documents[0]['embedding'])
+            await self._ensure_index_exists(index_name, vector_dimensions)
+
         search_client = self._get_search_client(index_name)
 
         # Prepare documents for Azure Search
