@@ -55,6 +55,22 @@ for package in "${PACKAGES[@]}"; do
 
     cd "$package"
 
+    # Extract package name and version from pyproject.toml
+    PACKAGE_NAME=$(grep '^name = ' pyproject.toml | sed 's/name = "\(.*\)"/\1/')
+    PACKAGE_VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+
+    echo "Package: $PACKAGE_NAME"
+    echo "Version: $PACKAGE_VERSION"
+
+    # Check if version already exists on PyPI
+    echo "🔍 Checking if version $PACKAGE_VERSION already exists on PyPI..."
+    if pip index versions "$PACKAGE_NAME" 2>/dev/null | grep -q "$PACKAGE_VERSION"; then
+        echo "⏭️  Version $PACKAGE_VERSION already exists on PyPI, skipping upload"
+        cd - > /dev/null
+        echo ""
+        continue
+    fi
+
     # Clean old builds
     rm -rf dist/ build/ *.egg-info
 
