@@ -14,6 +14,8 @@ from aiohttp import web
 from nlweb_core.NLWebVectorDBRankingHandler import NLWebVectorDBRankingHandler
 from nlweb_core.config import CONFIG
 from nlweb_core.utils import get_param
+from pydantic import ValidationError
+from nlweb_core.protocol import AskRequest, AskResponse, ResponseMeta
 
 
 async def ask_handler(request):
@@ -57,24 +59,39 @@ async def ask_handler(request):
         print(f"Method: {request.method}")
         print(f"Path: {request.path}")
         print(f"Query params: {query_params}")
-        print(f"========================\n")
 
-        # Validate required parameters
-        if 'query' not in query_params:
-            return web.json_response(
-                {"error": "Missing required parameter: query"},
-                status=400
-            )
+
+        # Validate required parameters using protocol model 'AskRequest' fields
+        ask_request_fields = {
+            k: v for k, v in query_params.items()
+            if k in ['query', 'prev', 'context', 'mode', 'site', 'streaming', 'response_format']
+        }
+
+        try:
+            ask_request = AskRequest(**ask_request_fields)
+            print(f" Request validate: {ask_request.model_dump()}")
+        except ValidationError as e:
+                print(f" Validation error: {e}")
+                return web.json_response(
+                    {
+                        "error": "Invalid request parameters",
+                        "details": e.errors(),
+                        "_meta": {"version": "0.5"}
+                    },
+                    status=400
+                )
+        
+        print(f"========================\n")      
 
         # Check streaming parameter
         streaming = get_param(query_params, "streaming", bool, True)
 
         if not streaming:
             # Non-streaming mode: collect all responses and return JSON
-            return await handle_non_streaming(query_params)
+            return await handle_non_streaming(query_params, ask_request)
         else:
             # Streaming mode: use SSE
-            return await handle_streaming(request, query_params)
+            return await handle_streaming(request, query_params, ask_request)
 
     except Exception as e:
         return web.json_response(
@@ -86,8 +103,14 @@ async def ask_handler(request):
         )
 
 
-async def handle_non_streaming(query_params):
-    """Handle non-streaming request, return complete JSON response."""
+async def handle_non_streaming(query_params, ask_request: AskRequest):
+    """
+    Handle non-streaming request, return complete JSON response.
+    
+    Args:
+        query_params: Full params dict (includes non-protocol fields like num_results, db)
+        ask_request: Validated AskRequest model from protocol
+    """
     responses = []
 
     async def output_method(data):
@@ -100,7 +123,7 @@ async def handle_non_streaming(query_params):
 
     # Build the response with _meta
     response = {
-        "_meta": {}
+        "_meta": {"version": "0.5"}
     }
 
     # Combine all responses
@@ -119,8 +142,15 @@ async def handle_non_streaming(query_params):
     return web.json_response(response)
 
 
-async def handle_streaming(request, query_params):
-    """Handle streaming request using Server-Sent Events."""
+async def handle_streaming(request, query_params, ask_request: AskRequest):
+    """
+    Handle streaming request using Server-Sent Events.
+    
+    Args:
+        request: aiohttp request object
+        query_params: Full params dict (includes non-protocol fields)
+        ask_request: Validated AskRequest model from protocol
+    """
     response = web.StreamResponse()
     response.headers['Content-Type'] = 'text/event-stream'
     response.headers['Cache-Control'] = 'no-cache'
@@ -145,6 +175,7 @@ async def handle_streaming(request, query_params):
         # Send completion event
         completion = {
             "_meta": {
+                "version": "0.5",
                 "nlweb/streaming_status": "finished"
             }
         }
@@ -155,6 +186,7 @@ async def handle_streaming(request, query_params):
         # Send error event
         error_data = {
             "_meta": {
+                "version": "0.5",
                 "nlweb/streaming_status": "error",
                 "error": str(e)
             }
@@ -206,6 +238,9 @@ async def mcp_handler(request):
 
         # Handle tools/list request
         elif method == "tools/list":
+            #Generate schema from AskRequest protocol model
+            ask_schema = AskRequest.model_json_schema()
+
             response = {
                 "jsonrpc": "2.0",
                 "id": request_id,
@@ -214,50 +249,7 @@ async def mcp_handler(request):
                         {
                             "name": "ask",
                             "description": "Search and answer natural language queries using NLWeb's vector database and LLM ranking",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "query": {
-                                        "type": "string",
-                                        "description": "Natural language query"
-                                    },
-                                    "prev": {
-                                        "type": "array",
-                                        "description": "Previous conversation context, typically previous queries",
-                                        "items": {"type": "string"}
-                                    },
-                                    "context": {
-                                        "type": "string",
-                                        "description": "Additional context"
-                                    },
-                                    "mode": {
-                                        "type": "string",
-                                        "description": "Processing mode (list|summary|...)"
-                                    },
-                                    "site": {
-                                        "type": "string",
-                                        "description": "Target site identifier"
-                                    },
-                                    "num_results": {
-                                        "type": "integer",
-                                        "description": "Number of results to return"
-                                    },
-                                    "num_start": {
-                                        "type": "integer",
-                                        "description": "Starting index for results"
-                                    },
-                                    "streaming": {
-                                        "type": "boolean",
-                                        "description": "Enable streaming response",
-                                        "default": False
-                                    },
-                                    "response_format": {
-                                        "type": "string",
-                                        "description": "Response format"
-                                    }
-                                },
-                                "required": ["query"]
-                            }
+                            "inputSchema": ask_schema
                         }
                     ]
                 }
@@ -286,18 +278,21 @@ async def mcp_handler(request):
             # Route to the ask handler
             query_params = arguments
 
-            if 'query' not in query_params:
+            try: 
+                ask_request = AskRequest(**arguments)
+            except ValidationError as e:    
                 return web.json_response({
                     "jsonrpc": "2.0",
                     "id": request_id,
                     "error": {
                         "code": -32602,
-                        "message": "Missing required parameter: query"
+                        "message": "Invalid parameters",
+                        "data": e.errors()
                     }
                 })
 
             # Execute the query
-            result_response = await handle_non_streaming(query_params)
+            result_response = await handle_non_streaming(arguments, ask_request)
 
             # Extract the JSON from the response
             result_json = json.loads(result_response.body)
@@ -393,19 +388,26 @@ def main():
     port = CONFIG.port
 
     print(f"Starting NLWeb server on http://{host}:{port}")
+    print(f" Using protocol validation from nlweb_core.protocol")
     print(f"\nEndpoints:")
     print(f"  - GET/POST /ask")
-    print(f"    Parameters (query string or JSON body for POST):")
+    print(f"    Protocol parameters (validated):")
     print(f"      - query=<your query> (required)")
+    print(f"      - mode=list|summary (optional)")
     print(f"      - site=<site_name> (optional)")
-    print(f"      - num_results=<number> (optional)")
     print(f"      - streaming=<true|false> (optional)")
+    print(f"      - prev=<previous queries as array> (optional)")
+    print(f"      - context=<additional context> (optional)")
+    print(f"      - response_format=<format preferences> (optional)")
+    print(f"    Additional parameters (passed through):")
+    print(f"      - num_results=<number> (optional)")
+    print(f"      - num_start=<starting index> (optional)")
     print(f"      - db=<endpoint_name> (optional)")
     print(f"  - GET /health")
     print(f"  - POST /mcp - MCP protocol endpoint (JSON-RPC 2.0)")
     print(f"\nExamples:")
-    print(f"  GET  - http://{host}:{port}/ask?query=best+pizza+restaurants")
-    print(f"  POST - curl -X POST http://{host}:{port}/ask -H 'Content-Type: application/json' -d '{{\"query\": \"best pizza\"}}'")
+    print(f"  GET  - http://{host}:{port}/ask?query=best+pizza+restaurants&mode=list")
+    print(f"  POST - curl -X POST http://{host}:{port}/ask -H 'Content-Type: application/json' -d '{{\"query\": \"best pizza\", \"mode\": \"summary\"}}'")    
     print(f"\nMCP Inspector:")
     print(f"  npx @modelcontextprotocol/inspector http://{host}:{port}/mcp")
 
