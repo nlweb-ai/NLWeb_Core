@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nlweb-network"
-version = "0.5.02"
+version = "0.5.03"
 description = "Network interfaces and server for NLWeb - HTTP, MCP, and A2A protocol adapters"
 readme = "README.md"
 license = {text = "MIT"}
@@ -23,7 +23,7 @@ classifiers = [
 ]
 requires-python = ">=3.9"
 dependencies = [
-    "nlweb-core>=0.5.02",
+    "nlweb-core>=0.5.03",
     "aiohttp>=3.8.0",
     "aiohttp-cors>=0.7.0",
 ]

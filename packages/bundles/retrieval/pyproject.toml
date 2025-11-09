@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nlweb-retrieval"
-version = "0.5.02"
+version = "0.5.03"
 description = "Retrieval provider bundle for NLWeb - includes all vector database and search providers"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -24,7 +24,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "nlweb-core>=0.5.02",
+    "nlweb-core>=0.5.03",
     # Azure AI Search
     "azure-core",
     "azure-search-documents>=11.4.0",

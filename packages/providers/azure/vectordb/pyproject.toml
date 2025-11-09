@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nlweb-azure-vectordb"
-version = "0.5.02"
+version = "0.5.03"
 description = "Azure AI Search provider for NLWeb - blueprint package for third-party providers"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -24,7 +24,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "nlweb-core>=0.5.02",
+    "nlweb-core>=0.5.03",
     "azure-core",
     "azure-search-documents>=11.4.0",
     "azure-identity>=1.12.0",

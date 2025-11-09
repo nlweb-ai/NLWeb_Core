@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nlweb-dataload"
-version = "0.5.02"
+version = "0.5.03"
 description = "Data loading tools for NLWeb - load schema.org JSON and RSS feeds into vector databases"
 readme = "README.md"
 license = { text = "MIT" }

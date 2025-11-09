@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nlweb-azure-models"
-version = "0.5.02"
+version = "0.5.03"
 description = "Azure OpenAI LLM and embedding providers for NLWeb - blueprint package"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -24,7 +24,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "nlweb-core>=0.5.02",
+    "nlweb-core>=0.5.03",
     "openai>=1.12.0",
     "azure-identity>=1.12.0",
 ]
