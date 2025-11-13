@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nlweb-core"
-version = "00.5.3"
+version = "0.5.3.post1"
 description = "NLWeb Core library for building natural language web applications with vector database retrieval and LLM-based ranking"
 readme = "README.md"
 requires-python = ">=3.8"
