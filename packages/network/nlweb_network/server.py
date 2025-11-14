@@ -183,8 +183,8 @@ def main():
     host = CONFIG.server.host
     port = CONFIG.port
 
-    # Run the server (silently)
-    web.run_app(app, host=host, port=port, print=lambda x: None)
+    # Run the server
+    web.run_app(app, host=host, port=port)
 
 
 if __name__ == '__main__':

@@ -45,8 +45,6 @@ async def load_to_db(
         # Load RSS feed
         result = await load_to_db("https://example.com/feed.xml", site="example", file_type="rss")
     """
-    print(f"[DB_LOAD] Loading data from {file_path} for site={site}")
-
     # Detect file type if not specified
     if not file_type:
         file_type = _detect_file_type(file_path)
@@ -60,15 +58,10 @@ async def load_to_db(
         raise ValueError(f"Unsupported file type: {file_type}. Use 'json' or 'rss'")
 
     if not documents:
-        print(f"[DB_LOAD] No documents loaded from {file_path}")
         return {'total_loaded': 0, 'errors': []}
-
-    print(f"[DB_LOAD] Loaded {len(documents)} documents, computing embeddings...")
 
     # Compute embeddings for all documents
     documents_with_embeddings = await _compute_embeddings(documents)
-
-    print(f"[DB_LOAD] Uploading {len(documents_with_embeddings)} documents in batches of {batch_size}...")
 
     # Get writer and upload in batches
     writer = get_vector_db_writer(endpoint_name)
@@ -77,17 +70,17 @@ async def load_to_db(
 
     for i in range(0, len(documents_with_embeddings), batch_size):
         batch = documents_with_embeddings[i:i + batch_size]
+        batch_num = i//batch_size + 1
         try:
             result = await writer.upload_documents(batch)
-            total_loaded += result.get('success_count', 0)
-            if result.get('error_count', 0) > 0:
-                errors.append(f"Batch {i//batch_size + 1}: {result['error_count']} errors")
+            success = result.get('success_count', 0)
+            errors_count = result.get('error_count', 0)
+            total_loaded += success
+            if errors_count > 0:
+                errors.append(f"Batch {batch_num}: {errors_count} errors")
         except Exception as e:
-            error_msg = f"Batch {i//batch_size + 1} failed: {str(e)}"
-            print(f"[DB_LOAD] {error_msg}")
+            error_msg = f"Batch {batch_num} failed: {str(e)}"
             errors.append(error_msg)
-
-    print(f"[DB_LOAD] Completed: {total_loaded} documents loaded, {len(errors)} errors")
 
     return {
         'total_loaded': total_loaded,
@@ -112,14 +105,8 @@ async def delete_site(
     Example:
         result = await delete_site("old-site.com")
     """
-    print(f"[DB_LOAD] Deleting all documents for site={site}")
-
     writer = get_vector_db_writer(endpoint_name)
     result = await writer.delete_site(site)
-
-    deleted_count = result.get('deleted_count', 0)
-    print(f"[DB_LOAD] Deleted {deleted_count} documents for site={site}")
-
     return result
 
 
@@ -186,17 +173,18 @@ async def _load_from_json(file_path: str, site: str) -> List[Dict[str, Any]]:
         # Extract required fields
         url = item.get('url') or item.get('@id') or item.get('isBasedOn')
         name = item.get('name') or item.get('headline') or 'Untitled'
+        item_type = item.get('@type', 'Unknown')
 
         if not url:
-            print(f"[DB_LOAD] Skipping item without URL: {name}")
             continue
 
-        # Create document
+        # Create document with schema matching retrieval expectations
         doc = {
             'url': url,
-            'name': name,
+            'type': item_type,
             'site': site,
-            'schema_json': json.dumps(item)
+            'content': json.dumps(item),  # Store full schema.org JSON as content
+            'timestamp': None  # Will be set during upload if needed
         }
         documents.append(doc)
 
@@ -222,15 +210,17 @@ async def _load_from_rss(file_path: str, site: str) -> List[Dict[str, Any]]:
     for item in schema_items:
         url = item.get('url') or item.get('@id')
         name = item.get('name') or item.get('headline') or 'Untitled'
+        item_type = item.get('@type', 'Unknown')
 
         if not url:
             continue
 
         doc = {
             'url': url,
-            'name': name,
+            'type': item_type,
             'site': site,
-            'schema_json': json.dumps(item)
+            'content': json.dumps(item),  # Store full schema.org JSON as content
+            'timestamp': None  # Will be set during upload if needed
         }
         documents.append(doc)
 
@@ -250,9 +240,9 @@ async def _compute_embeddings(documents: List[Dict[str, Any]]) -> List[Dict[str,
     # Compute embeddings for all documents
     tasks = []
     for doc in documents:
-        # Use name + description or just name for embedding
-        schema_data = json.loads(doc['schema_json'])
-        text_for_embedding = schema_data.get('description', '') or doc['name']
+        # Use content for embedding (it contains the full schema.org JSON)
+        schema_data = json.loads(doc['content'])
+        text_for_embedding = schema_data.get('description', '') or schema_data.get('name', '') or 'Untitled'
         tasks.append(get_embedding(text_for_embedding))
 
     # Get all embeddings concurrently

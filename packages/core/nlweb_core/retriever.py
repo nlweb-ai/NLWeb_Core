@@ -189,13 +189,9 @@ class VectorDBClient:
         Returns:
             List of search results
         """
-     
-        try:
-            client = await self.get_client()
-            return await client.search(query, site, num_results, **kwargs)
-
-        except Exception as e:
-            raise
+        client = await self.get_client()
+        results = await client.search(query, site, num_results, **kwargs)
+        return results
 
 
 # Factory function to make it easier to get a client with the right type

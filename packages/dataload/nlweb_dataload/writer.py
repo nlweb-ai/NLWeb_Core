@@ -31,12 +31,13 @@ class VectorDBWriterInterface(ABC):
 
         Args:
             documents: List of document dictionaries with fields like:
-                - id: Unique document identifier
+                - id: Unique document identifier (optional, auto-generated if not provided)
                 - url: Document URL
-                - name: Document name
+                - type: Document type (e.g., "Movie", "Article", "Product")
                 - site: Site identifier
+                - content: Document content (typically JSON string of schema.org data)
                 - embedding: Vector embedding (list of floats)
-                - schema_json: JSON string of schema.org data
+                - timestamp: Optional timestamp
             **kwargs: Additional provider-specific parameters
 
         Returns:

@@ -51,7 +51,7 @@ class AzureSearchClient(VectorDBClientInterface):
             raise ValueError(f"api_endpoint is not configured for endpoint {self.endpoint_name}")
 
         self.api_endpoint = self.endpoint_config.api_endpoint.strip('"')
-        self.default_index_name = self.endpoint_config.index_name or "embeddings1536"
+        self.default_index_name = self.endpoint_config.index_name or "crawler-vectors"
 
         # API key is only required for api_key authentication
         if self.auth_method == "api_key":
@@ -201,7 +201,7 @@ class AzureSearchClient(VectorDBClientInterface):
                 }
             ],
             "top": top_n,
-            "select": "url,name,site,schema_json"
+            "select": "url,type,site,content"
         }
 
         # Only add filter if we have a site restriction
@@ -218,7 +218,7 @@ class AzureSearchClient(VectorDBClientInterface):
             # Process results into a more convenient format
             processed_results = []
             for result in results:
-                processed_result = [result["url"], result["schema_json"], result["name"], result["site"]]
+                processed_result = [result["url"], result["content"], result["type"], result["site"]]
                 processed_results.append(processed_result)
 
             print(f"[AZURE_SEARCH] Processed {len(processed_results)} results")

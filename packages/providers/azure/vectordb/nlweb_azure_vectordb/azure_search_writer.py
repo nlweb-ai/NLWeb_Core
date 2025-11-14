@@ -10,6 +10,7 @@ deleting documents in Azure AI Search indexes.
 
 import asyncio
 import hashlib
+from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
 from azure.core.credentials import AzureKeyCredential
@@ -152,14 +153,13 @@ class AzureSearchWriter(VectorDBWriterInterface):
             return
 
         # Create index with vector search configuration
-        print(f"[AZURE_SEARCH_WRITER] Creating index '{index_name}' with vector dimension {vector_dimensions}")
-
         fields = [
             SimpleField(name="id", type=SearchFieldDataType.String, key=True),
             SearchableField(name="url", type=SearchFieldDataType.String),
-            SearchableField(name="name", type=SearchFieldDataType.String),
-            SimpleField(name="site", type=SearchFieldDataType.String, filterable=True),
-            SearchableField(name="schema_json", type=SearchFieldDataType.String),
+            SearchableField(name="site", type=SearchFieldDataType.String, filterable=True, sortable=True, facetable=True),
+            SearchableField(name="type", type=SearchFieldDataType.String),
+            SearchableField(name="content", type=SearchFieldDataType.String),
+            SimpleField(name="timestamp", type=SearchFieldDataType.DateTimeOffset),
             SearchField(
                 name="embedding",
                 type=SearchFieldDataType.Collection(SearchFieldDataType.Single),
@@ -192,7 +192,6 @@ class AzureSearchWriter(VectorDBWriterInterface):
             return index_client.create_index(index)
 
         await asyncio.get_event_loop().run_in_executor(None, create_index)
-        print(f"[AZURE_SEARCH_WRITER] Index '{index_name}' created successfully")
 
     def _generate_document_id(self, url: str, site: str) -> str:
         """
@@ -221,10 +220,11 @@ class AzureSearchWriter(VectorDBWriterInterface):
         Args:
             documents: List of document dicts with fields:
                 - url (required)
-                - name (required)
+                - type (required)
                 - site (required)
+                - content (required): Document content/schema JSON
                 - embedding (required): List of floats
-                - schema_json (required): JSON string
+                - timestamp (optional): DateTimeOffset
                 - id (optional): If not provided, generated from URL + site
             index_name: Optional index name (defaults to configured index name)
             **kwargs: Additional parameters
@@ -251,10 +251,11 @@ class AzureSearchWriter(VectorDBWriterInterface):
             prepared_doc = {
                 'id': doc_id,
                 'url': doc['url'],
-                'name': doc['name'],
                 'site': doc['site'],
+                'type': doc['type'],
+                'content': doc['content'],
                 'embedding': doc['embedding'],
-                'schema_json': doc['schema_json']
+                'timestamp': doc.get('timestamp') or datetime.now(timezone.utc).isoformat()
             }
             prepared_docs.append(prepared_doc)
 
@@ -267,10 +268,6 @@ class AzureSearchWriter(VectorDBWriterInterface):
         # Process results
         success_count = sum(1 for r in result if r.succeeded)
         error_count = sum(1 for r in result if not r.succeeded)
-
-        print(f"[AZURE_SEARCH_WRITER] Uploaded {success_count} documents to {index_name}")
-        if error_count > 0:
-            print(f"[AZURE_SEARCH_WRITER] {error_count} documents failed")
 
         return {
             'success_count': success_count,
@@ -316,7 +313,6 @@ class AzureSearchWriter(VectorDBWriterInterface):
         results = await asyncio.get_event_loop().run_in_executor(None, search_sync)
 
         if not results:
-            print(f"[AZURE_SEARCH_WRITER] No documents found matching {filter_criteria}")
             return {'deleted_count': 0}
 
         # Delete documents by ID
@@ -328,7 +324,6 @@ class AzureSearchWriter(VectorDBWriterInterface):
         delete_result = await asyncio.get_event_loop().run_in_executor(None, delete_sync)
 
         deleted_count = sum(1 for r in delete_result if r.succeeded)
-        print(f"[AZURE_SEARCH_WRITER] Deleted {deleted_count} documents from {index_name}")
 
         return {'deleted_count': deleted_count}
 
