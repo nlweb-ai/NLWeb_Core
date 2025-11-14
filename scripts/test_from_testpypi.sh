@@ -57,6 +57,9 @@ pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://
 echo "  → Installing nlweb-qdrant-vectordb..."
 pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple nlweb-qdrant-vectordb
 
+echo "  → Installing nlweb-snowflake-vectordb..."
+pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple nlweb-snowflake-vectordb
+
 echo "  → Installing nlweb-azure-models..."
 pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple nlweb-azure-models
 

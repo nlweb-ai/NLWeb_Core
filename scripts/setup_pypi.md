@@ -73,6 +73,7 @@ These package names will be uploaded:
 - ✅ `nlweb-azure-vectordb` - Azure AI Search provider
 - ✅ `nlweb-elastic-vectordb` - Elasticsearch provider
 - ✅ `nlweb-qdrant-vectordb` - Qdrant provider
+- ✅ `nlweb-snowflake-vectordb` - Snowflake Cortex Search provider
 - ✅ `nlweb-azure-models` - Azure OpenAI provider
 - ✅ `nlweb-retrieval` - All retrieval providers bundle
 - ✅ `nlweb-models` - All model providers bundle

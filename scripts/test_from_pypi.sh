@@ -50,6 +50,9 @@ pip install --quiet nlweb-elastic-vectordb
 echo "  → Installing nlweb-qdrant-vectordb..."
 pip install --quiet nlweb-qdrant-vectordb
 
+echo "  → Installing nlweb-snowflake-vectordb..."
+pip install --quiet nlweb-snowflake-vectordb
+
 echo ""
 echo "✅ All packages installed"
 echo ""
@@ -223,3 +226,4 @@ echo "  pip install nlweb-core"
 echo "  pip install nlweb-network"
 echo "  pip install nlweb-elastic-vectordb"
 echo "  pip install nlweb-qdrant-vectordb"
+echo "  pip install nlweb-snowflake-vectordb"

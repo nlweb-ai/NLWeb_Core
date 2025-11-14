@@ -37,6 +37,7 @@ PACKAGES=(
     "packages/providers/azure/vectordb"   # Depends on core (optional)
     "packages/providers/elastic/vectordb" # Depends on core (optional)
     "packages/providers/qdrant/vectordb"  # Depends on core (optional)
+    "packages/providers/snowflake/vectordb" # Depends on core (optional)
     "packages/bundles/retrieval"  # Depends on core + all retrieval providers
     "packages/bundles/models"     # Depends on core + all model providers
 )

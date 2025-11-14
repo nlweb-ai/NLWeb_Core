@@ -35,7 +35,7 @@ echo ""
 
 # Install packages from PyPI
 echo "📦 Installing packages from PyPI..."
-pip install --quiet nlweb-dataload nlweb-core nlweb-network nlweb-azure-vectordb nlweb-elastic-vectordb nlweb-qdrant-vectordb nlweb-azure-models
+pip install --quiet nlweb-dataload nlweb-core nlweb-network nlweb-azure-vectordb nlweb-elastic-vectordb nlweb-qdrant-vectordb nlweb-snowflake-vectordb nlweb-azure-models
 
 echo "✅ All packages installed"
 echo ""
