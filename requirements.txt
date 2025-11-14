@@ -1,0 +1,12 @@
+# NLWeb Core packages from PyPI
+nlweb-core>=0.5.03
+nlweb-network>=0.5.03
+nlweb-azure-models>=0.5.03
+nlweb-azure-vectordb>=0.5.03
+
+# Server dependencies
+gunicorn>=20.1.0
+aiohttp-cors>=0.7.0
+
+# Azure SDK for managed identity
+azure-identity>=1.12.0

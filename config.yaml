@@ -1,0 +1,41 @@
+# NLWeb Configuration for Azure Web App
+server:
+  host: "0.0.0.0"
+  enable_cors: true
+
+port: 8000
+
+# Embedding configuration for Azure OpenAI
+embedding:
+  provider: azure_oai
+  endpoint_env: AZURE_OPENAI_ENDPOINT
+  api_key_env: AZURE_OPENAI_API_KEY
+  api_version: "2024-02-15-preview"
+  model: text-embedding-3-small
+  auth_method: api_key
+  import_path: nlweb_azure_models.embedding.azure_oai_embedding
+  class_name: get_azure_embedding
+
+# Retrieval configuration for Azure Search
+retrieval:
+  provider: azure_search
+  enabled: true
+  api_endpoint_env: AZURE_SEARCH_ENDPOINT
+  auth_method: azure_ad
+  db_type: azure_ai_search
+  index_name: crawler-vectors
+  import_path: nlweb_azure_vectordb.azure_search_client
+  class_name: AzureSearchClient
+
+# LLM configuration for ranking
+llm:
+  provider: azure_openai
+  models:
+    high: gpt-4.1
+    low: gpt-4.1-mini
+  endpoint_env: AZURE_OPENAI_ENDPOINT
+  api_key_env: AZURE_OPENAI_API_KEY
+  api_version: "2024-02-15-preview"
+  auth_method: api_key
+  import_path: nlweb_azure_models.llm.azure_oai
+  class_name: provider
