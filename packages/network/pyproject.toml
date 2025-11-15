@@ -2,9 +2,12 @@
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.dynamic]
+version = {file = "../../VERSION"}
+
 [project]
 name = "nlweb-network"
-version = "0.5.4"
+version = ["version"]
 description = "Network interfaces and server for NLWeb - HTTP, MCP, and A2A protocol adapters"
 readme = "README.md"
 license = {text = "MIT"}

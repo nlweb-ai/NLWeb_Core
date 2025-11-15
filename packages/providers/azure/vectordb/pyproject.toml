@@ -2,10 +2,13 @@
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.dynamic]
+version = {file = "../../../../VERSION"}
+
 [project]
 name = "nlweb-azure-vectordb"
-version = "0.5.4"
-description = "Azure AI Search provider for NLWeb - blueprint package for third-party providers"
+dynamic = ["version"]
+description = "Azure vector database provider for NLWeb - Azure AI Search client"
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}

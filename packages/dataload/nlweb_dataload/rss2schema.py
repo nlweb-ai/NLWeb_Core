@@ -9,16 +9,25 @@ consistent processing in NLWeb.
 """
 
 import feedparser
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from datetime import datetime
+import aiohttp
+import asyncio
+
+# Get version for User-Agent
+try:
+    from . import __version__
+except ImportError:
+    __version__ = "unknown"
 
 
-async def parse_rss_to_schema(feed_url: str) -> List[Dict[str, Any]]:
+async def parse_rss_to_schema(feed_url: str, timeout: int = 30) -> List[Dict[str, Any]]:
     """
     Parse RSS/Atom feed and convert to schema.org Article format.
 
     Args:
         feed_url: URL or path to RSS/Atom feed
+        timeout: Timeout in seconds for fetching the feed (default: 30)
 
     Returns:
         List of schema.org Article dicts
@@ -26,26 +35,78 @@ async def parse_rss_to_schema(feed_url: str) -> List[Dict[str, Any]]:
     Example:
         articles = await parse_rss_to_schema("https://example.com/feed.xml")
     """
-    # Parse feed using feedparser
-    feed = feedparser.parse(feed_url)
+    try:
+        print(f"[RSS2SCHEMA] Fetching feed from {feed_url}")
+        
+        # Determine if this is a URL or local file
+        is_url = feed_url.startswith('http://') or feed_url.startswith('https://')
+        
+        if is_url:
+            # Fetch feed content asynchronously with timeout
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        feed_url, 
+                        timeout=aiohttp.ClientTimeout(total=timeout),
+                        headers={'User-Agent': f'NLWeb-DataLoad/{__version__}'}
+                    ) as response:
+                        print(f"[RSS2SCHEMA] HTTP status: {response.status}")
+                        
+                        if response.status >= 400:
+                            print(f"[RSS2SCHEMA] Error: HTTP {response.status} when fetching feed")
+                            return []
+                        
+                        feed_content = await response.text()
+                        print(f"[RSS2SCHEMA] Downloaded {len(feed_content)} bytes")
+            except asyncio.TimeoutError:
+                print(f"[RSS2SCHEMA] Error: Timeout after {timeout}s fetching feed")
+                return []
+            except aiohttp.ClientError as e:
+                print(f"[RSS2SCHEMA] Error: Network error fetching feed: {e}")
+                return []
+            
+            # Parse the downloaded content
+            feed = feedparser.parse(feed_content)
+        else:
+            # Local file - parse directly
+            feed = feedparser.parse(feed_url)
+        
+        # Check for parsing errors
+        if hasattr(feed, 'bozo') and feed.bozo:
+            print(f"[RSS2SCHEMA] Warning: Feed has bozo flag set")
+            if hasattr(feed, 'bozo_exception'):
+                print(f"[RSS2SCHEMA] Bozo exception: {feed.bozo_exception}")
+        
+        # Check for entries
+        if not hasattr(feed, 'entries') or not feed.entries:
+            print(f"[RSS2SCHEMA] No entries found in feed: {feed_url}")
+            print(f"[RSS2SCHEMA] Feed keys: {list(feed.keys())}")
+            if hasattr(feed, 'feed') and hasattr(feed.feed, 'keys'):
+                print(f"[RSS2SCHEMA] Feed.feed keys: {list(feed.feed.keys())}")
+                if hasattr(feed.feed, 'title'):
+                    print(f"[RSS2SCHEMA] Feed title: {feed.feed.title}")
+            return []
 
-    if not feed.entries:
-        print(f"[RSS2SCHEMA] No entries found in feed: {feed_url}")
+        print(f"[RSS2SCHEMA] Parsed {len(feed.entries)} entries from {feed_url}")
+
+        # Convert each entry to schema.org Article
+        articles = []
+        for entry in feed.entries:
+            article = _entry_to_schema_article(entry, feed)
+            if article:
+                articles.append(article)
+
+        print(f"[RSS2SCHEMA] Converted {len(articles)} entries to schema.org format")
+        return articles
+        
+    except Exception as e:
+        print(f"[RSS2SCHEMA] Error parsing feed {feed_url}: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return []
 
-    print(f"[RSS2SCHEMA] Parsed {len(feed.entries)} entries from {feed_url}")
 
-    # Convert each entry to schema.org Article
-    articles = []
-    for entry in feed.entries:
-        article = _entry_to_schema_article(entry, feed)
-        if article:
-            articles.append(article)
-
-    return articles
-
-
-def _entry_to_schema_article(entry, feed) -> Dict[str, Any]:
+def _entry_to_schema_article(entry, feed) -> Optional[Dict[str, Any]]:
     """
     Convert a feed entry to schema.org Article format.
 
@@ -171,7 +232,7 @@ def _clean_html(text: str) -> str:
     return text
 
 
-def _parse_date(date_str: str) -> str:
+def _parse_date(date_str: str) -> Optional[str]:
     """
     Parse date string to ISO format.
 
@@ -187,7 +248,7 @@ def _parse_date(date_str: str) -> str:
     try:
         # feedparser provides time_struct for parsed dates
         if hasattr(date_str, 'timetuple'):
-            dt = datetime(*date_str.timetuple()[:6])
+            dt = datetime(*(date_str.timetuple()[:6]))  # type: ignore
             return dt.strftime('%Y-%m-%d')
         return date_str
     except Exception:

@@ -5,9 +5,12 @@
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.dynamic]
+version = {file = "../../VERSION"}
+
 [project]
 name = "nlweb-dataload"
-version = "0.5.4"
+dynamic = ["version"]
 description = "Data loading tools for NLWeb - load schema.org JSON and RSS feeds into vector databases"
 readme = "README.md"
 license = { text = "MIT" }

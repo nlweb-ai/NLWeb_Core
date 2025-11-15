@@ -16,6 +16,7 @@ from pathlib import Path
 from .embedding import get_embedding
 from .writer import get_vector_db_writer
 from .rss2schema import parse_rss_to_schema
+from .csv2schema import parse_csv_to_schema
 
 
 async def load_to_db(
@@ -23,17 +24,21 @@ async def load_to_db(
     site: str,
     endpoint_name: Optional[str] = None,
     batch_size: int = 100,
-    file_type: Optional[str] = None
+    file_type: Optional[str] = None,
+    csv_name_column: Optional[str] = None,
+    csv_identifier_column: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Load schema.org data from JSON or RSS file into vector database.
+    Load schema.org data from JSON, RSS, or CSV file into vector database.
 
     Args:
-        file_path: Path to JSON or RSS file (local or URL)
+        file_path: Path to JSON, RSS, or CSV file (local or URL)
         site: Site identifier for all documents
         endpoint_name: Optional endpoint name (defaults to write_endpoint from config)
         batch_size: Number of documents to upload per batch
-        file_type: Optional file type hint ('json' or 'rss'), auto-detected if not provided
+        file_type: Optional file type hint ('json', 'rss', or 'csv'), auto-detected if not provided
+        csv_name_column: For CSV: column name to use as name (default: first column)
+        csv_identifier_column: For CSV: column to use as unique identifier (default: row index)
 
     Returns:
         Dict with loading results (total_loaded, errors)
@@ -44,6 +49,17 @@ async def load_to_db(
 
         # Load RSS feed
         result = await load_to_db("https://example.com/feed.xml", site="example", file_type="rss")
+        
+        # Load CSV file (auto-detects columns, no URLs needed)
+        result = await load_to_db("companies.csv", site="companies", file_type="csv")
+        
+        # Load CSV with custom name and identifier columns.
+        result = await load_to_db(
+            "companies.csv", 
+            site="companies",
+            csv_name_column="company_name",
+            csv_identifier_column="company_id"
+        )
     """
     # Detect file type if not specified
     if not file_type:
@@ -54,8 +70,15 @@ async def load_to_db(
         documents = await _load_from_rss(file_path, site)
     elif file_type == 'json':
         documents = await _load_from_json(file_path, site)
+    elif file_type == 'csv':
+        documents = await _load_from_csv(
+            file_path, 
+            site,
+            csv_name_column,
+            csv_identifier_column
+        )
     else:
-        raise ValueError(f"Unsupported file type: {file_type}. Use 'json' or 'rss'")
+        raise ValueError(f"Unsupported file type: {file_type}. Use 'json', 'rss', or 'csv'")
 
     if not documents:
         return {'total_loaded': 0, 'errors': []}
@@ -118,9 +141,13 @@ def _detect_file_type(file_path: str) -> str:
         file_path: Path or URL to file
 
     Returns:
-        File type ('json' or 'rss')
+        File type ('json', 'rss', or 'csv')
     """
     path_lower = file_path.lower()
+
+    # CSV file patterns
+    if path_lower.endswith('.csv'):
+        return 'csv'
 
     # RSS/Atom feed patterns
     if any(pattern in path_lower for pattern in ['.xml', '.rss', '.atom', '/feed', '/rss']):
@@ -227,6 +254,49 @@ async def _load_from_rss(file_path: str, site: str) -> List[Dict[str, Any]]:
     return documents
 
 
+async def _load_from_csv(
+    file_path: str, 
+    site: str,
+    name_column: Optional[str] = None,
+    identifier_column: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """
+    Load documents from CSV file.
+
+    Args:
+        file_path: Path or URL to CSV file
+        site: Site identifier
+        name_column: Column name to use as name/title (default: first column)
+        identifier_column: Column name to use as unique identifier (default: row index)
+
+    Returns:
+        List of document dicts
+    """
+    # Parse CSV to schema.org format
+    schema_items = await parse_csv_to_schema(
+        file_path,
+        name_column=name_column,
+        identifier_column=identifier_column
+    )
+
+    # Convert to document format
+    documents = []
+    for item in schema_items:
+        # Use @id as the unique identifier (no URL required)
+        identifier = item.get('@id', 'unknown')
+        name = item.get('name', 'Untitled')
+
+        doc = {
+            'url': f"{site}/{identifier}",  # Generate a reference URL from site and ID
+            'name': name,
+            'site': site,
+            'schema_json': json.dumps(item)
+        }
+        documents.append(doc)
+
+    return documents
+
+
 async def _compute_embeddings(documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Compute embeddings for all documents.
@@ -267,15 +337,19 @@ def main():
     from .config import init
 
     parser = argparse.ArgumentParser(
-        description='Load schema.org data or RSS feeds into vector databases'
+        description='Load schema.org data, RSS feeds, or CSV files into vector databases'
     )
-    parser.add_argument('--file', help='Path to JSON or RSS file (local or URL)')
+    parser.add_argument('--file', help='Path to JSON, RSS, or CSV file (local or URL)')
     parser.add_argument('--site', help='Site identifier for documents')
-    parser.add_argument('--type', choices=['json', 'rss'], help='File type (auto-detected if not specified)')
+    parser.add_argument('--type', choices=['json', 'rss', 'csv'], help='File type (auto-detected if not specified)')
     parser.add_argument('--batch-size', type=int, default=100, help='Batch size for uploads (default: 100)')
     parser.add_argument('--endpoint', help='Database endpoint name (uses write_endpoint if not specified)')
     parser.add_argument('--config', help='Path to config.yaml (default: ./config.yaml)')
     parser.add_argument('--delete-site', help='Delete all documents for the specified site')
+    
+    # CSV-specific options
+    parser.add_argument('--csv-name-column', help='CSV column name to use as name/title (default: first column)')
+    parser.add_argument('--csv-identifier-column', help='CSV column name to use as unique identifier (default: row index)')
 
     args = parser.parse_args()
 
@@ -295,7 +369,9 @@ def main():
             site=args.site,
             endpoint_name=args.endpoint,
             batch_size=args.batch_size,
-            file_type=args.type
+            file_type=args.type,
+            csv_name_column=args.csv_name_column,
+            csv_identifier_column=args.csv_identifier_column
         ))
         print(f"\n✅ Successfully loaded {result['total_loaded']} documents")
         if result['errors']:

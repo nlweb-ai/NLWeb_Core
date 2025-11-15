@@ -2,10 +2,14 @@
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.dynamic]
+version = {file = "../../VERSION"}
+
 [project]
 name = "nlweb-core"
-version = "0.5.4"
+dynamic = ["version"]
 description = "Core framework for NLWeb - Natural Language Web interface with config-driven provider architecture"
+
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}

@@ -2,10 +2,13 @@
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.dynamic]
+version = {file = "../../../VERSION"}
+
 [project]
 name = "nlweb-retrieval"
-version = "0.5.3.post1"
-description = "Retrieval provider bundle for NLWeb - includes all vector database and search providers"
+dynamic = ["version"]
+description = "Retrieval bundle for NLWeb - includes vector database clients for multiple providers"
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
@@ -24,7 +27,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "nlweb-core>=0.5.3.post1",
+    "nlweb-core>=0.5.4",
     # Azure AI Search
     "azure-core",
     "azure-search-documents>=11.4.0",

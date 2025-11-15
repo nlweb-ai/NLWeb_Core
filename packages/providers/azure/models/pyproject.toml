@@ -2,10 +2,13 @@
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.dynamic]
+version = {file = "../../../../VERSION"}
+
 [project]
 name = "nlweb-azure-models"
-version = "0.5.4"
-description = "Azure OpenAI LLM and embedding providers for NLWeb - blueprint package"
+dynamic = ["version"]
+description = "Azure models provider for NLWeb - Azure OpenAI embedding and LLM interfaces"
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}

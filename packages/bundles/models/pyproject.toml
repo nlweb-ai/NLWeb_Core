@@ -2,10 +2,13 @@
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.dynamic]
+version = {file = "../../../VERSION"}
+
 [project]
 name = "nlweb-models"
-version = "0.5.3.post1"
-description = "Model provider bundle for NLWeb - includes all LLM and embedding providers"
+dynamic = ["version"]
+description = "Model bundle for NLWeb - includes embedding and LLM interfaces for multiple providers"
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
@@ -24,7 +27,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "nlweb-core>=0.5.3.post1",
+    "nlweb-core>=0.5.4",
     # OpenAI (used by multiple providers)
     "openai>=1.12.0",
     # Anthropic
