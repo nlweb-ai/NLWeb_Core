@@ -10,11 +10,7 @@ into vector databases with automatic embedding generation.
 Does not depend on nlweb-core - includes its own minimal config and embedding wrapper.
 """
 
-from pathlib import Path
-
-# Read version from VERSION file in repo root
-_version_file = Path(__file__).parent.parent.parent.parent / "VERSION"
-__version__ = "0.5.4.post2"
+__version__ = "0.5.5"
 
 from .config import init
 from .db_load import (

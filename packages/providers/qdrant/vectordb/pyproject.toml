@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nlweb-qdrant-vectordb"
-version = "0.5.4"
+version = "0.5.5"
 description = "Qdrant provider for NLWeb - third-party vector database provider"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -24,7 +24,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "nlweb-core>=0.5.4",
+    "nlweb-core>=0.5.5",
     "qdrant-client>=1.7.0",
 ]
 

@@ -1,3 +1,0 @@
-2025-05-28T02:23:33      Error occurred, type: error, text: Error removing symlink: Path doesn't exist!, stackTrace:    at Mono.Unix.UnixFileSystemInfo.AssertValid()
-   at Mono.Unix.UnixFileSystemInfo.get_FileType()
-   at Kudu.Services.Deployment.PushDeploymentController.PushDeployAsync(ArtifactDeploymentInfo deploymentInfo, Boolean isAsync, HttpContext context, JObject requestJson) in /tmp/KuduLite/Kudu.Services/Deployment/PushDeploymentController.cs:line 740

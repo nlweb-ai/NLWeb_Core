@@ -1,9 +1,0 @@
-<step title="Incoming Request" date="2025-05-28T02:12:55.599" instance="72814a" url="/api/deployments/latest" method="GET" type="request" pid="821,1,46" Accept="*/*" Host="nlw.scm.azurewebsites.net" User-Agent="AZURECLI/2.73.0 (HOMEBREW)" Accept-Encoding="gzip, deflate" Authorization="Bea..." x-ms-client-request-id="3eb1cb76-3b69-11f0-9f4e-22de8617e482" X-ARR-LOG-ID="3eb1cb76-3b69-11f0-9f4e-22de8617e482" CLIENT-IP="204.11.229.42:65168" X-SITE-DEPLOYMENT-ID="nlw" WAS-DEFAULT-HOSTNAME="nlw.scm.azurewebsites.net" X-Forwarded-Proto="https" X-AppService-Proto="https" X-Forwarded-TlsVersion="1.3" X-WAWS-Unencoded-URL="/api/deployments/latest" X-Client-IP="204.11.229.42" X-Client-Port="65168" >
-  <step title="Cleanup Xml Logs" date="2025-05-28T02:12:55.601" /><!-- duration: 7ms -->
-  <step title="DeploymentService.GetResult" date="2025-05-28T02:12:55.628" >
-    <step title="DeploymentService.GetLatestDeployment" date="2025-05-28T02:12:55.633" >
-      <step title="DeploymentManager.GetResults" date="2025-05-28T02:12:55.635" /><!-- duration: 118ms -->
-    </step><!-- duration: 122ms -->
-  </step><!-- duration: 129ms -->
-  <step title="Outgoing response" date="2025-05-28T02:12:55.767" type="response" statusCode="202" statusText="Accepted" /><!-- duration: 2ms -->
-</step><!-- duration: 171ms -->

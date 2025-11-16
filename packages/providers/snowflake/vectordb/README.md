@@ -97,7 +97,7 @@ The search service should be created with vector embeddings enabled.
 ## Requirements
 
 - Python 3.10+
-- nlweb-core >= 0.5.4
+- nlweb-core >= 0.5.5
 - httpx >= 0.28.1
 - Active Snowflake account with Cortex Search enabled
 - Valid Programmatic Access Token (PAT)
