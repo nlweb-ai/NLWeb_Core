@@ -170,29 +170,18 @@ async def ask_llm(
     # Determine provider from parameter or config
     provider_name = provider or CONFIG.preferred_llm_endpoint
 
-    print(f"[LLM] Provider: {provider_name}, Level: {level}")
-
     if provider_name not in CONFIG.llm_endpoints:
-        error_msg = f"Unknown provider '{provider_name}'"
-        print(f"[LLM] ERROR: {error_msg}")
-        print(f"[LLM] Available endpoints: {list(CONFIG.llm_endpoints.keys())}")
         return {}
 
     # Get provider config using the helper method
     provider_config = CONFIG.get_llm_provider(provider_name)
     if not provider_config or not provider_config.models:
-        error_msg = f"Missing model configuration for provider '{provider_name}'"
-        print(f"[LLM] ERROR: {error_msg}")
         return {}
 
     # Get llm_type for dispatch
     llm_type = provider_config.llm_type
-    print(f"[LLM] LLM type: {llm_type}")
 
     model_id = getattr(provider_config.models, level)
-    print(f"[LLM] Model ID: {model_id}")
-    print(f"[LLM] Prompt (first 200 chars): {prompt[:200] if len(prompt) > 200 else prompt}")
-    print(f"[LLM] Schema: {schema}")
 
     # Initialize variables for exception handling
     llm_type_for_error = llm_type
@@ -202,28 +191,20 @@ async def ask_llm(
         # Get the provider instance based on llm_type
         try:
             provider_instance = _get_provider(llm_type, provider_config)
-            print(f"[LLM] Got provider instance: {type(provider_instance).__name__}")
         except ValueError as e:
-            error_msg = str(e)
-            print(f"[LLM] ERROR getting provider: {error_msg}")
             return {}
 
         # Simply call the provider's get_completion method without locking
         # Each provider should handle thread-safety internally
-        print(f"[LLM] Calling get_completion...")
         result = await asyncio.wait_for(
             provider_instance.get_completion(prompt, schema, model=model_id, timeout=timeout, max_tokens=max_length),
             timeout=timeout
         )
-        print(f"[LLM] Got result: {type(result)}, keys: {result.keys() if isinstance(result, dict) else 'N/A'}")
         return result
 
     except asyncio.TimeoutError:
-        print(f"[LLM] ERROR: Timeout after {timeout}s")
         return {}
     except Exception as e:
-        error_msg = f"LLM call failed: {type(e).__name__}: {str(e)}"
-        print(f"[LLM] ERROR: {error_msg}")
         import traceback
         traceback.print_exc()
         return {}

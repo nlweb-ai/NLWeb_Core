@@ -42,8 +42,6 @@ class VectorDBRetriever:
         site = self.handler.get_param('site', str, 'all')
         num_results = self.handler.get_param('num_results', int, 50)
 
-        print(f"\n[RETRIEVER] Query: '{query}', Site: '{site}', Num results: {num_results}")
-
         # Determine endpoint configuration
         # Option (a): Check if query_params specifies vectordb configuration
         endpoint_name = None
@@ -63,12 +61,8 @@ class VectorDBRetriever:
             query_params=self.handler.query_params
         )
 
-        print(f"[RETRIEVER] Using endpoint: {client.endpoint_name} (type: {client.db_type})")
-
         # Perform the search
         results = await client.search(query, site, num_results)
-
-        print(f"[RETRIEVER] Retrieved {len(results)} results")
 
         return results
 

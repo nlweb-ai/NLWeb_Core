@@ -11,7 +11,7 @@ Backwards compatibility is not guaranteed at this time.
 
 from abc import ABC, abstractmethod
 import asyncio
-from nlweb_core.query_analysis.query_analysis import DefaultQueryAnalysisHandler, QueryAnalysisHandler
+from nlweb_core.query_analysis.query_analysis import DefaultQueryAnalysisHandler, QueryAnalysisHandler, query_analysis_tree
 from nlweb_core.utils import get_param as _get_param
 
 class NLWebHandler(ABC):
@@ -36,6 +36,8 @@ class NLWebHandler(ABC):
 
     async def prepare(self):
         await self.decontextualizeQuery()
+        # Update self.query after decontextualization
+        self.query = self.query_params.get("query", self.query)
         query_analysis_handler = QueryAnalysisHandler(self)
         await query_analysis_handler.do()
 
@@ -47,13 +49,32 @@ class NLWebHandler(ABC):
         prev_queries = self.get_param("prev", list, [])
         context = self.get_param("context", str, None)
 
+        # Populate variables needed by decontextualization prompts
+        self.query_params["request.rawQuery"] = self.query
+        self.query_params["request.site"] = self.get_param("site", str, "all")
+        
         if (len(prev_queries) == 0 and context is None):
             self.query_params["decontextualized_query"] = self.query
         elif (len(prev_queries) > 0 and context is None):
-            DefaultQueryAnalysisHandler(self.nlweb_handler, prompt_ref="PrevQueryDecontextualizer").do()
+            # Join previous queries for the prompt
+            self.query_params["request.previousQueries"] = ", ".join(prev_queries)
+            
+            result = await DefaultQueryAnalysisHandler(self, prompt_ref="PrevQueryDecontextualizer", root_node=query_analysis_tree).do()
+            
+            if result and "decontextualized_query" in result:
+                self.query_params["decontextualized_query"] = result["decontextualized_query"]
+            else:
+                self.query_params["decontextualized_query"] = self.query
             self.query_params["query"] = self.query_params["decontextualized_query"]
         else:
-            DefaultQueryAnalysisHandler(self.nlweb_handler, prompt_ref="FullContextDecontextualizer").do()
+            self.query_params["request.previousQueries"] = ", ".join(prev_queries) if prev_queries else ""
+            self.query_params["request.context"] = context
+            
+            result = await DefaultQueryAnalysisHandler(self, prompt_ref="FullContextDecontextualizer", root_node=query_analysis_tree).do()
+            if result and "decontextualized_query" in result:
+                self.query_params["decontextualized_query"] = result["decontextualized_query"]
+            else:
+                self.query_params["decontextualized_query"] = self.query
             self.query_params["query"] = self.query_params["decontextualized_query"]
     
     def set_meta_attribute(self, key, value):

@@ -89,9 +89,11 @@ class HTTPSSEInterface(BaseInterface):
         Returns:
             aiohttp StreamResponse
         """
+        import sys
         try:
             # Parse request
             query_params = await self.parse_request(request)
+            print(f"[DEBUG] Parsed query_params: {query_params}", file=sys.stderr)
 
             # Create SSE response
             response = web.StreamResponse(
@@ -109,8 +111,11 @@ class HTTPSSEInterface(BaseInterface):
             output_method = self.create_output_method(response)
 
             # Create and run handler
+            print(f"[DEBUG] Creating handler with class: {handler_class}", file=sys.stderr)
             handler = handler_class(query_params, output_method)
+            print(f"[DEBUG] Running query...", file=sys.stderr)
             await handler.runQuery()
+            print(f"[DEBUG] Query completed successfully", file=sys.stderr)
 
             # Finalize stream
             await self.finalize_response(response)
@@ -118,6 +123,9 @@ class HTTPSSEInterface(BaseInterface):
             return response
 
         except ValueError as e:
+            print(f"[ERROR] ValueError: {e}", file=sys.stderr)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
             # For errors, return a single SSE event with error
             response = web.StreamResponse(
                 status=200,  # SSE uses 200 even for errors
@@ -142,6 +150,9 @@ class HTTPSSEInterface(BaseInterface):
             return response
 
         except Exception as e:
+            print(f"[ERROR] Unexpected exception: {e}", file=sys.stderr)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
             # For unexpected errors
             response = web.StreamResponse(
                 status=200,

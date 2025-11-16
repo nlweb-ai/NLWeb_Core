@@ -1,5 +1,4 @@
- 
- <?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="UTF-8"?>
 
  <QueryAnalysisSettings>
 
@@ -115,7 +114,7 @@
       </returnStruc>
     </QueryAnalysis>
 
-    <Promp ref="QueryRewrite" enabled="true">
+    <QueryAnalysis ref="QueryRewrite" enabled="true">
   <method>defaultQueryAnalysisHandler</method>
       <promptString>
         You are helping to rewrite a complex search query into simpler keyword queries for a traditional keyword-based search engine.

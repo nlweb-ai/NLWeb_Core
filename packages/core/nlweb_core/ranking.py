@@ -16,7 +16,7 @@ import json
 
 def log(message):
     """Simple logging function."""
-    print(message)
+    pass
 
 
 # Schema.org markup trimming utilities
@@ -47,7 +47,6 @@ def should_skip_item(site, item):
             if type_value in skip_types:
                 return True
     elif "@type" not in item:
-        print(f"Warning: Item without @type field found for site {site}, keeping item: {str(item)[:100]}...")
         return False
     return False
 
@@ -154,7 +153,7 @@ def trim_schema_json_item(schema_json, site):
 
 class Ranking:
      
-    EARLY_SEND_THRESHOLD = 59
+    EARLY_SEND_THRESHOLD = 69
     NUM_RESULTS_TO_SEND = 10
 
     # This is the default ranking prompt, in case, for some reason, we can't find the site_type.xml file.
@@ -174,8 +173,6 @@ The user's question is: {request.query}. The item's description is {item.descrip
         return self.RANKING_PROMPT[0], self.RANKING_PROMPT[1]
         
     def __init__(self, handler, items, level="low"):
-        ll = len(items)
-        print(f"\n[RANKING] Initializing with {ll} items")
         self.handler = handler
         self.level = level
         self.items = items
@@ -186,11 +183,14 @@ The user's question is: {request.query}. The item's description is {item.descrip
         try:
             prompt_str, ans_struc = self.get_ranking_prompt()
             description = trim_json(json_str)
+            
+            # Populate the missing keys needed by the prompt template
+            # The prompt template uses {request.query} and {site.itemType}
+            self.handler.query_params["request.query"] = self.handler.query
+            self.handler.query_params["site.itemType"] = "item"  # Default to "item" if not specified
+            
             prompt = fill_prompt_variables(prompt_str, self.handler.query_params, {"item.description": description})
             ranking = await ask_llm(prompt, ans_struc, level=self.level, query_params=self.handler.query_params)
-
-            print(f"[RANKING] LLM response for {name}: {ranking}")
-            print(f"[RANKING] Item: {name}, Score: {ranking.get('score', 'N/A')}")
 
             # Handle both string and dictionary inputs for json_str
             schema_object = json_str if isinstance(json_str, dict) else json.loads(json_str)
@@ -206,7 +206,7 @@ The user's question is: {request.query}. The item's description is {item.descrip
                 "url": url,
                 "name": name,
                 "site": site,
-                "score": ranking["score"],
+                "score": ranking.get("score", 0),
                 "description": ranking["description"],
                 "sent": False
             }
@@ -238,9 +238,7 @@ The user's question is: {request.query}. The item's description is {item.descrip
 
                     # Check if we can still send more results
                     if self.num_results_sent < max_results:
-                        # Create a copy without the 'sent' field for sending
-                        result_to_send = {k: v for k, v in result.items() if k != "sent" and k != "score"}
-                        await self.handler.send_answer(result_to_send)
+                        await self.handler.send_answer(result)
                         result["sent"] = True
                         self.num_results_sent += 1
 
@@ -249,7 +247,6 @@ The user's question is: {request.query}. The item's description is {item.descrip
                     return
 
         except Exception as e:
-            print(f"[RANKING] Error ranking item {name}: {type(e).__name__}: {str(e)}")
             import traceback
             traceback.print_exc()
             # Import here to avoid circular import
@@ -260,10 +257,7 @@ The user's question is: {request.query}. The item's description is {item.descrip
 
     async def sendRemainingAnswers(self, answers):
         """Send remaining answers that weren't sent early."""
-        print(f"[RANKING] sendRemainingAnswers called with {len(answers)} answers")
-
         if not self.handler.connection_alive_event.is_set():
-            print("[RANKING] Connection not alive in sendRemainingAnswers")
             return
 
         # Wait for pre checks to be done
@@ -274,87 +268,62 @@ The user's question is: {request.query}. The item's description is {item.descrip
 
         # Filter unsent results
         unsent = [r for r in answers if not r["sent"]]
-        print(f"[RANKING] Found {len(unsent)} unsent results, already sent: {self.num_results_sent}")
 
         # Calculate how many more we can send
         remaining_slots = max_results - self.num_results_sent
-        print(f"[RANKING] Remaining slots: {remaining_slots}")
 
         if remaining_slots <= 0:
-            print("[RANKING] No remaining slots, returning")
             return
 
         # Take only what we can send
         to_send = unsent[:remaining_slots]
-        print(f"[RANKING] Will send {len(to_send)} results")
 
         if to_send:
             try:
                 # Send each result using send_answer
                 for i, result in enumerate(to_send):
-                    # Create a copy without the 'sent' field and 'score' for sending
-                    result_to_send = {k: v for k, v in result.items() if k != "sent" and k != "score"}
-                    print(f"[RANKING] Sending result {i+1}/{len(to_send)}: {result.get('name', 'unknown')}")
+                    # Create a copy without the 'sent' field for sending (keep score)
+                    result_to_send = {k: v for k, v in result.items() if k != "sent"}
                     await self.handler.send_answer(result_to_send)
                     result["sent"] = True
                     self.num_results_sent += 1
-                print(f"[RANKING] Successfully sent {len(to_send)} results")
             except (BrokenPipeError, ConnectionResetError) as e:
-                print(f"[RANKING] Connection error: {e}")
                 self.handler.connection_alive_event.clear()
             except Exception as e:
-                print(f"[RANKING] Error sending results: {e}")
                 import traceback
                 traceback.print_exc()
                 self.handler.connection_alive_event.clear()
 
     async def do(self):
-        print(f"[RANKING] Starting ranking for {len(self.items)} items")
-
         tasks = []
         for url, json_str, name, site in self.items:
             if self.handler.connection_alive_event.is_set():  # Only add new tasks if connection is still alive
                 tasks.append(asyncio.create_task(self.rankItem(url, json_str, name, site)))
 
-        print(f"[RANKING] Created {len(tasks)} ranking tasks")
-
         try:
             await asyncio.gather(*tasks, return_exceptions=True)
         except Exception as e:
-            print(f"[RANKING] Error during gather: {e}")
             return
 
-        print(f"[RANKING] Completed all ranking tasks. Total ranked: {len(self.rankedAnswers)}")
-
         if not self.handler.connection_alive_event.is_set():
-            print("[RANKING] Connection not alive, returning")
             return
 
         # Wait for pre checks using event
-        print("[RANKING] Waiting for pre_checks_done_event")
         await self.handler.pre_checks_done_event.wait()
-        print("[RANKING] Pre-checks done")
 
         # Use min_score from handler if available, otherwise default to 51
         min_score_threshold = self.handler.get_param('min_score', int, 51)
         # Use max_results from handler if available, otherwise use NUM_RESULTS_TO_SEND
         max_results = self.handler.get_param('max_results', int, self.NUM_RESULTS_TO_SEND)
 
-        print(f"[RANKING] Min score threshold: {min_score_threshold}, Max results: {max_results}")
-
         # Filter and sort by score
         filtered = [r for r in self.rankedAnswers if r['score'] > min_score_threshold]
-        print(f"[RANKING] Filtered {len(filtered)} items above score {min_score_threshold}")
 
         ranked = sorted(filtered, key=lambda x: x["score"], reverse=True)
         self.handler.final_ranked_answers = ranked[:max_results]
 
-        print(f"[RANKING] Sending {len(ranked)} remaining answers")
-
-        # Send remaining unsent results
+        # Send remaining unsent results (only send up to max_results)
         try:
-            await self.sendRemainingAnswers(ranked)
+            await self.sendRemainingAnswers(ranked[:max_results])
         except (BrokenPipeError, ConnectionResetError):
             self.handler.connection_alive_event.clear()
-
-        print(f"[RANKING] Finished. Total sent: {self.num_results_sent}")

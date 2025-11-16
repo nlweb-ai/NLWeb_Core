@@ -28,6 +28,7 @@ from nlweb_network.interfaces import (
     A2AStreamableInterface,
     A2ASSEInterface
 )
+import pathlib
 
 
 async def health_handler(request):
@@ -150,6 +151,15 @@ def create_app():
     app.router.add_post('/a2a', a2a_handler)  # A2A StreamableHTTP (JSON-RPC over HTTP)
     app.router.add_get('/a2a-sse', a2a_sse_handler)  # A2A over SSE (streaming)
     app.router.add_post('/a2a-sse', a2a_sse_handler)  # A2A over SSE (streaming)
+
+    # Serve static files (UI)
+    static_dir = pathlib.Path(__file__).parent / 'static'
+    if static_dir.exists():
+        app.router.add_static('/static', static_dir, name='static')
+        # Serve index.html at root
+        app.router.add_get('/', lambda request: web.FileResponse(static_dir / 'index.html'))
+    else:
+        print(f"Warning: Static directory not found at {static_dir}")
 
     # Enable CORS if configured
     if CONFIG.server.enable_cors:

@@ -186,10 +186,6 @@ class AzureSearchClient(VectorDBClientInterface):
                     site_restrict += " or "
                 site_restrict += f"site eq '{site}'"
 
-        print(f"[AZURE_SEARCH] Site filter: {site_restrict}")
-        print(f"[AZURE_SEARCH] Embedding dimension: {len(vector_embedding)}")
-        print(f"[AZURE_SEARCH] Index: {index_name}")
-
         # Create the search options with vector search and filtering
         search_options = {
             "vector_queries": [
@@ -221,11 +217,9 @@ class AzureSearchClient(VectorDBClientInterface):
                 processed_result = [result["url"], result["content"], result["type"], result["site"]]
                 processed_results.append(processed_result)
 
-            print(f"[AZURE_SEARCH] Processed {len(processed_results)} results")
             return processed_results
 
         except Exception as e:
-            print(f"[AZURE_SEARCH] Error during search: {type(e).__name__}: {str(e)}")
             import traceback
             traceback.print_exc()
             return []

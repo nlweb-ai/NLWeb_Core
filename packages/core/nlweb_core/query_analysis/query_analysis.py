@@ -29,9 +29,21 @@ def read_xml_file(file_path):
 
 # Initialize on module load
 try:
-    query_analysis_tree = read_xml_file("query_analysis.xml")
-    decontextualizer_tree = read_xml_file("decontextualizer.xml")
+    # Get the directory where this module is located
+    module_dir = os.path.dirname(__file__)
+    query_analysis_xml_path = os.path.join(module_dir, "query_analysis.xml")
+    
+    query_analysis_tree = read_xml_file(query_analysis_xml_path)
+    
+    # Try to load decontextualizer.xml if it exists
+    decontextualizer_xml_path = os.path.join(module_dir, "decontextualizer.xml")
+    if os.path.exists(decontextualizer_xml_path):
+        decontextualizer_tree = read_xml_file(decontextualizer_xml_path)
+    else:
+        decontextualizer_tree = query_analysis_tree
 except Exception as e:
+    import traceback
+    traceback.print_exc()
     pass
 
 
@@ -139,8 +151,8 @@ class DefaultQueryAnalysisHandler:
         if prompt_ref is None and xml_node is None:
             raise ValueError("Both prompt_ref and xml_node cannot be None. One must be provided.")
         if xml_node is None:
-            # Try to find the xml_node from the handler's query_analysis_tree using prompt_ref
-            tree = getattr(self.handler, 'query_analysis_tree', None)
+            # Try to find the xml_node from the root_node using prompt_ref
+            tree = root_node
             if tree is not None and prompt_ref is not None:
                 for node in tree.findall('.//QueryAnalysis'):
                     ref = node.get('ref')

@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NLWeb Chat</title>
+    <link rel="stylesheet" href="/static/nlweb-chat.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Mobile Menu Toggle -->
+        <button class="mobile-menu-toggle" id="mobile-menu-toggle">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="3" y1="12" x2="21" y2="12"></line>
+                <line x1="3" y1="6" x2="21" y2="6"></line>
+                <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+        </button>
+        
+        <!-- Sidebar Toggle Button (outside sidebar) -->
+        <button class="sidebar-toggle" id="sidebar-toggle" title="Toggle sidebar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="15 18 9 12 15 6"></polyline>
+            </svg>
+        </button>
+
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <!-- Conversations header with new button -->
+                <div class="conversations-header">
+                    <h2 class="conversations-title">Conversations</h2>
+                    <div class="header-buttons">
+                        <button class="new-chat-icon-btn" id="new-chat-btn" title="New chat">
+                            <span class="plus-icon">+</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Conversations list -->
+            <div class="conversations-list" id="conversations-list">
+                <!-- Conversation items will be added dynamically -->
+            </div>
+        </aside>
+
+        <!-- Main Chat Area -->
+        <main class="main-content">
+            <header class="chat-header">
+                <div class="chat-header-left">
+                    <!-- Header content removed - using centered input instead -->
+                </div>
+            </header>
+
+            <div class="chat-messages" id="chat-messages">
+                <div class="messages-container" id="messages-container">
+                    <!-- Messages will be dynamically added here -->
+                    <div class="centered-input-container">
+                        <div class="centered-input-wrapper">
+                            <div class="centered-input-box">
+                                <div class="input-box-top-row">
+                                    <textarea id="centered-chat-input" class="centered-chat-input" placeholder="Ask" rows="2"></textarea>
+                                    <button id="centered-send-button" class="centered-send-button">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <line x1="22" y1="2" x2="11" y2="13"></line>
+                                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                                        </svg>
+                                    </button>
+                                </div>
+                                <div class="input-box-bottom-row">
+                                    <input type="text" id="site-input" class="site-input" placeholder="Site (optional)">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="chat-input-container" style="display: none;">
+                <div class="chat-input-wrapper">
+                    <div class="chat-input-box">
+                        <textarea class="chat-input" id="chat-input" placeholder="Send a message..." rows="1"></textarea>
+                        <button class="send-button" id="send-button">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="22" y1="2" x2="11" y2="13"></line>
+                                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                            </svg>
+                            Send
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="/static/nlweb-chat.js"></script>
+</body>
+</html>

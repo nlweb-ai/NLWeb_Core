@@ -48,3 +48,6 @@ nlweb-server = "nlweb_network.server:main"
 where = ["."]
 include = ["nlweb_network*"]
 exclude = ["tests*"]
+
+[tool.setuptools.package-data]
+nlweb_network = ["static/*"]
