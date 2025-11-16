@@ -2,12 +2,9 @@
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools.dynamic]
-version = {file = "VERSION"}
-
 [project]
 name = "nlweb-models"
-dynamic = ["version"]
+version = "0.5.4.post2"
 description = "Model bundle for NLWeb - includes embedding and LLM interfaces for multiple providers"
 readme = "README.md"
 requires-python = ">=3.9"

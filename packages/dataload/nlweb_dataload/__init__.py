@@ -14,7 +14,7 @@ from pathlib import Path
 
 # Read version from VERSION file in repo root
 _version_file = Path(__file__).parent.parent.parent.parent / "VERSION"
-__version__ = _version_file.read_text().strip()
+__version__ = "0.5.4.post2"
 
 from .config import init
 from .db_load import (
