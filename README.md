@@ -1,6 +1,6 @@
 # NLWeb Core
 
-A modular Python framework for building natural language web applications with vector database retrieval, LLM-based ranking, and multiple protocol support (HTTP, MCP, A2A).
+A Modular Python Framework for building natural language web applications with vector database retrieval, LLM-based ranking, and multiple protocol support (HTTP, MCP, A2A).
 
 ## Features
 
