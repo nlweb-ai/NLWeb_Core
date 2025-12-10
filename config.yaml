@@ -1,9 +1,9 @@
 # NLWeb Configuration for Azure Web App
+port: 8000
+
 server:
   host: "0.0.0.0"
   enable_cors: true
-
-port: 8000
 
 # Embedding configuration for Azure OpenAI
 embedding:
@@ -21,11 +21,16 @@ retrieval:
   provider: azure_search
   enabled: true
   api_endpoint_env: AZURE_SEARCH_ENDPOINT
-  auth_method: azure_ad
+  api_key_env: AZURE_SEARCH_KEY
+  auth_method: api_key
   db_type: azure_ai_search
   index_name: crawler-vectors
   import_path: nlweb_azure_vectordb.azure_search_client
   class_name: AzureSearchClient
+  # Hybrid search: combines keyword (BM25) + vector (semantic) search using RRF
+  # Set to false for pure vector search, true for hybrid
+  # Note: Azure Search uses fixed Reciprocal Rank Fusion (RRF) - no blend parameter
+  hybrid_search: true
 
 # LLM configuration for ranking
 llm:

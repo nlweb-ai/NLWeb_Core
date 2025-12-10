@@ -135,6 +135,8 @@ class AzureSearchClient(VectorDBClientInterface):
         """
         index_name = index_name or self.default_index_name
 
+        hybrid_override = kwargs.get('hybrid', None)
+
         # Get embedding for the query
         start_embed = time.time()
         embedding = await get_embedding(query, query_params=query_params)
@@ -142,7 +144,7 @@ class AzureSearchClient(VectorDBClientInterface):
 
         # Perform the search
         start_retrieve = time.time()
-        results = await self._retrieve_by_site_and_vector(site, embedding, num_results, index_name)
+        results = await self._retrieve_by_site_and_vector(site, embedding, num_results, index_name, query, hybrid_override)
         retrieve_time = time.time() - start_retrieve
 
 
@@ -151,7 +153,9 @@ class AzureSearchClient(VectorDBClientInterface):
     async def _retrieve_by_site_and_vector(self, sites: Union[str, List[str]],
                                          vector_embedding: List[float],
                                          top_n: int = 10,
-                                         index_name: Optional[str] = None) -> List[List[str]]:
+                                         index_name: Optional[str] = None,
+                                         query_text: Optional[str] = None,
+                                         hybrid_override: Optional[bool] = None) -> List[List[str]]:
         """
         Internal method to retrieve top n records filtered by site and ranked by vector similarity
 
@@ -160,6 +164,8 @@ class AzureSearchClient(VectorDBClientInterface):
             vector_embedding: The embedding vector to search with
             top_n: Maximum number of results to return
             index_name: Optional index name (defaults to configured index name)
+            query_text: Optional query text for hybrid search (keyword + vector)
+            hybrid_override: Optional per-query override for hybrid search (True/False/None)
 
         Returns:
             List[List[str]]: List of search results
@@ -186,6 +192,9 @@ class AzureSearchClient(VectorDBClientInterface):
                     site_restrict += " or "
                 site_restrict += f"site eq '{site}'"
 
+        # Check if hybrid search is enabled - use override if provided, otherwise use config
+        hybrid_enabled = hybrid_override if hybrid_override is not None else getattr(self.endpoint_config, 'hybrid_search', False)
+
         # Create the search options with vector search and filtering
         search_options = {
             "vector_queries": [
@@ -206,8 +215,10 @@ class AzureSearchClient(VectorDBClientInterface):
 
         try:
             # Execute the search asynchronously
+            search_text_param = query_text if (hybrid_enabled and query_text) else None
+            
             def search_sync():
-                return search_client.search(search_text=None, **search_options)
+                return search_client.search(search_text=search_text_param, **search_options)
 
             results = await asyncio.get_event_loop().run_in_executor(None, search_sync)
 
