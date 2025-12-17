@@ -16,7 +16,9 @@ Each endpoint uses an interface adapter to handle protocol-specific
 formatting while routing to the appropriate NLWeb handler.
 """
 
-from aiohttp import web
+from aiohttp import request, web
+from aiohttp.web_request import Request
+from aiohttp.web_exceptions import HTTPInternalServerError
 from nlweb_core.config import CONFIG
 from nlweb_core.NLWebVectorDBRankingHandler import NLWebVectorDBRankingHandler
 from nlweb_core.utils import get_param
@@ -26,9 +28,11 @@ from nlweb_network.interfaces import (
     MCPStreamableInterface,
     MCPSSEInterface,
     A2AStreamableInterface,
-    A2ASSEInterface
+    A2ASSEInterface,
 )
 import pathlib
+from pyinstrument import Profiler, processors
+from pyinstrument.renderers import HTMLRenderer
 
 
 async def health_handler(request):
@@ -59,7 +63,7 @@ async def ask_handler(request):
     query_params = dict(request.query)
 
     # For POST requests, check JSON body too
-    if request.method == 'POST':
+    if request.method == "POST":
         try:
             body = await request.json()
             query_params = {**query_params, **body}
@@ -67,8 +71,8 @@ async def ask_handler(request):
             pass
 
     # Extract streaming from prefer section (default: true)
-    prefer = query_params.get('prefer', {})
-    streaming = prefer.get('streaming', True) if isinstance(prefer, dict) else True
+    prefer = query_params.get("prefer", {})
+    streaming = prefer.get("streaming", True) if isinstance(prefer, dict) else True
 
     # Route to appropriate interface
     if streaming:
@@ -153,58 +157,100 @@ async def await_handler(request):
         body = await request.json()
 
         # Validate required fields
-        if 'promise_token' not in body:
-            return web.json_response({
-                '_meta': {'response_type': 'Failure', 'version': '0.54'},
-                'error': {'code': 'MISSING_FIELD', 'message': 'Missing required field: promise_token'}
-            }, status=400)
+        if "promise_token" not in body:
+            return web.json_response(
+                {
+                    "_meta": {"response_type": "Failure", "version": "0.54"},
+                    "error": {
+                        "code": "MISSING_FIELD",
+                        "message": "Missing required field: promise_token",
+                    },
+                },
+                status=400,
+            )
 
-        if 'action' not in body or body['action'] not in ['checkin', 'cancel']:
-            return web.json_response({
-                '_meta': {'response_type': 'Failure', 'version': '0.54'},
-                'error': {'code': 'INVALID_ACTION', 'message': 'Action must be "checkin" or "cancel"'}
-            }, status=400)
+        if "action" not in body or body["action"] not in ["checkin", "cancel"]:
+            return web.json_response(
+                {
+                    "_meta": {"response_type": "Failure", "version": "0.54"},
+                    "error": {
+                        "code": "INVALID_ACTION",
+                        "message": 'Action must be "checkin" or "cancel"',
+                    },
+                },
+                status=400,
+            )
 
         # TODO: Implement promise tracking/checking logic
         # For now, return a placeholder Promise response
-        return web.json_response({
-            '_meta': {'response_type': 'Promise', 'version': '0.54'},
-            'promise': {'token': body['promise_token'], 'estimated_time': 60}
-        })
+        return web.json_response(
+            {
+                "_meta": {"response_type": "Promise", "version": "0.54"},
+                "promise": {"token": body["promise_token"], "estimated_time": 60},
+            }
+        )
 
     except Exception as e:
-        return web.json_response({
-            '_meta': {'response_type': 'Failure', 'version': '0.54'},
-            'error': {'code': 'INTERNAL_ERROR', 'message': str(e)}
-        }, status=500)
+        return web.json_response(
+            {
+                "_meta": {"response_type": "Failure", "version": "0.54"},
+                "error": {"code": "INTERNAL_ERROR", "message": str(e)},
+            },
+            status=500,
+        )
+
+
+async def profile_request(app, handler):
+    """Middleware to profile requests if X-Profile-Request header is set."""
+
+    async def middleware(request: Request):
+        if not request.headers.get("X-Profile-Request", False):
+            return await handler(request)
+        profiler = Profiler(async_mode="enabled")
+        profiler.start()
+        await handler(request)
+        profiler.stop()
+        session = profiler.last_session
+        if session is None:
+            raise HTTPInternalServerError(reason="Profiling session is None")
+        renderer = HTMLRenderer()
+        renderer.preprocessors.insert(0, processors.group_library_frames_processor)
+        renderer.preprocessor_options = {
+            "hide_regex": ".*/(starlette|httpx|asyncio)/.*"
+        }
+        return web.Response(body=renderer.render(session))
+
+    return middleware
 
 
 def create_app():
     """Create and configure the aiohttp application."""
-    app = web.Application()
+    app = web.Application(middlewares=[profile_request])
 
     # Add HTTP routes
-    app.router.add_get('/ask', ask_handler)
-    app.router.add_post('/ask', ask_handler)
-    app.router.add_post('/await', await_handler)
-    app.router.add_get('/health', health_handler)
+    app.router.add_get("/ask", ask_handler)
+    app.router.add_post("/ask", ask_handler)
+    app.router.add_post("/await", await_handler)
+    app.router.add_get("/health", health_handler)
 
     # Add MCP routes
-    app.router.add_post('/mcp', mcp_handler)  # MCP StreamableHTTP (JSON-RPC over HTTP)
-    app.router.add_get('/mcp-sse', mcp_sse_handler)  # MCP over SSE (streaming)
-    app.router.add_post('/mcp-sse', mcp_sse_handler)  # MCP over SSE (streaming)
+    app.router.add_post("/mcp", mcp_handler)  # MCP StreamableHTTP (JSON-RPC over HTTP)
+    app.router.add_get("/mcp-sse", mcp_sse_handler)  # MCP over SSE (streaming)
+    app.router.add_post("/mcp-sse", mcp_sse_handler)  # MCP over SSE (streaming)
 
     # Add A2A routes
-    app.router.add_post('/a2a', a2a_handler)  # A2A StreamableHTTP (JSON-RPC over HTTP)
-    app.router.add_get('/a2a-sse', a2a_sse_handler)  # A2A over SSE (streaming)
-    app.router.add_post('/a2a-sse', a2a_sse_handler)  # A2A over SSE (streaming)
+    app.router.add_post("/a2a", a2a_handler)  # A2A StreamableHTTP (JSON-RPC over HTTP)
+    app.router.add_get("/a2a-sse", a2a_sse_handler)  # A2A over SSE (streaming)
+    app.router.add_post("/a2a-sse", a2a_sse_handler)  # A2A over SSE (streaming)
 
     # Serve static files (UI)
-    static_dir = pathlib.Path(__file__).parent / 'static'
+    static_dir = pathlib.Path(__file__).parent / "static"
     if static_dir.exists():
-        app.router.add_static('/static', static_dir, name='static')
+        app.router.add_static("/static", static_dir, name="static")
         # Serve index.html at root
-        app.router.add_get('/', lambda request: web.FileResponse(static_dir / 'index.html'))
+        app.router.add_get(
+            "/", lambda request: web.FileResponse(static_dir / "index.html")
+        )
     else:
         print(f"Warning: Static directory not found at {static_dir}")
 
@@ -213,14 +259,17 @@ def create_app():
         try:
             from aiohttp_cors import setup as cors_setup, ResourceOptions
 
-            cors = cors_setup(app, defaults={
-                "*": ResourceOptions(
-                    allow_credentials=True,
-                    expose_headers="*",
-                    allow_headers="*",
-                    allow_methods="*"
-                )
-            })
+            cors = cors_setup(
+                app,
+                defaults={
+                    "*": ResourceOptions(
+                        allow_credentials=True,
+                        expose_headers="*",
+                        allow_headers="*",
+                        allow_methods="*",
+                    )
+                },
+            )
 
             # Configure CORS for all routes
             for route in list(app.router.routes()):
@@ -244,5 +293,5 @@ def main():
     web.run_app(app, host=host, port=port)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
