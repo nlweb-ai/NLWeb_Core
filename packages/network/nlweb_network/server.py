@@ -204,7 +204,7 @@ async def profile_request(app, handler):
     """Middleware to profile requests if X-Profile-Request header is set."""
 
     async def middleware(request: Request):
-        if not request.headers.get("X-Profile-Request", False):
+        if request.headers.get("X-Profile-Request", "false") != "true":
             return await handler(request)
         profiler = Profiler(async_mode="enabled")
         profiler.start()
