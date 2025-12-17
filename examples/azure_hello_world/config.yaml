@@ -34,11 +34,6 @@ embedding:
   auth_method: api_key  # Use 'azure_ad' for managed identity
   model: text-embedding-3-small
 
-scoring-llm-model:
-  llm_type: pilabs 
-  import_path: nlweb_models.llm.pi_labs 
-  class_name: PiLabsProvider
-
 retrieval:
   provider: azure_ai_search
   import_path: nlweb_azure_vectordb.azure_search_client
@@ -46,7 +41,7 @@ retrieval:
   api_endpoint_env: AZURE_SEARCH_ENDPOINT
   api_key_env: AZURE_SEARCH_KEY
   auth_method: api_key # Use 'azure_ad' for managed identity
-  index_name: crawler-vectors
+  index_name: embeddings1536
   writer:
     import_path: nlweb_azure_vectordb.azure_search_writer
     class_name: AzureSearchWriter
