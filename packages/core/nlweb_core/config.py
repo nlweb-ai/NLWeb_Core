@@ -157,6 +157,8 @@ class ObjectLookupConfig:
     database_name: Optional[str] = None
     container_name: Optional[str] = None
     partition_key: Optional[str] = None
+    import_path: Optional[str] = None
+    class_name: Optional[str] = None
 
 @dataclass
 class StorageBehaviorConfig:
@@ -363,7 +365,9 @@ class AppConfig:
                 endpoint=self._get_config_value(obj_cfg.get('endpoint_env')) if 'endpoint_env' in obj_cfg else obj_cfg.get('endpoint'),
                 database_name=obj_cfg.get('database_name'),
                 container_name=obj_cfg.get('container_name'),
-                partition_key=obj_cfg.get('partition_key')
+                partition_key=obj_cfg.get('partition_key'),
+                import_path=self._get_config_value(obj_cfg.get('import_path')),
+                class_name=self._get_config_value(obj_cfg.get('class_name'))
             )
         else:
             # Default: object storage disabled
