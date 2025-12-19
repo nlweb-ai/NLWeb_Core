@@ -30,7 +30,7 @@ Create `config.yaml`:
 retrieval:
   provider: qdrant
   import_path: nlweb_qdrant_vectordb.qdrant_client
-  class_name: QdrantClient
+  class_name: QdrantVectorClient
   api_endpoint_env: QDRANT_URL  # Optional for remote Qdrant
   api_key_env: QDRANT_API_KEY  # Optional for remote Qdrant
   database_path_env: QDRANT_PATH  # Optional for local Qdrant
@@ -70,13 +70,33 @@ results = await retriever.search(
 
 ## Features
 
-- Vector similarity search with Qdrant
+- Vector similarity search with Qdrant using 1536-dimensional embeddings
 - Support for both remote and local Qdrant instances
 - HNSW-based efficient similarity search
 - Configurable collection names
 - API key authentication for remote instances
 - Local file-based storage option
+- Automatic query embedding using NLWeb's embedding providers
 - Compatible with NLWeb Protocol v0.5
+
+## Data Format
+
+The Qdrant provider expects documents with the following payload structure:
+- `url`: Document URL (string)
+- `content`: Full document content as JSON string (string)
+- `type`: Document type (string)
+- `site`: Site identifier for filtering (string)
+- `embedding`: 1536-dimensional vector (stored separately in Qdrant)
+
+Example payload:
+```json
+{
+  "url": "https://example.com/page",
+  "content": "{\"@type\": \"Article\", \"name\": \"Title\", \"description\": \"...\"}", 
+  "type": "Article",
+  "site": "example.com"
+}
+```
 
 ## Creating Your Own Provider Package
 
