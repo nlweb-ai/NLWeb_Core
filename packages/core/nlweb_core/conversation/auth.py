@@ -65,23 +65,31 @@ async def validate_conversation_access(
         messages = await storage.get_messages(conversation_id, limit=1)
 
         if not messages:
-            logger.warning(f"Conversation {conversation_id} not found")
+            # Sanitize conversation_id for logging to prevent log injection
+            sanitized_conv_id = conversation_id.replace('\n', '\\n').replace('\r', '\\r')
+            logger.warning(f"Conversation {sanitized_conv_id} not found")
             return False
 
         # Extract user_id from message metadata
         message_user_id = messages[0].metadata.get('user_id') if messages[0].metadata else None
 
         if not message_user_id:
-            logger.warning(f"Conversation {conversation_id} has no user_id in metadata")
+            # Sanitize conversation_id for logging to prevent log injection
+            sanitized_conv_id = conversation_id.replace('\n', '\\n').replace('\r', '\\r')
+            logger.warning(f"Conversation {sanitized_conv_id} has no user_id in metadata")
             return False
 
         # Check if user_id matches
         has_access = message_user_id == authenticated_user_id
 
         if not has_access:
+            # Sanitize all user-provided values for logging to prevent log injection
+            sanitized_auth_user = authenticated_user_id.replace('\n', '\\n').replace('\r', '\\r')
+            sanitized_conv_id = conversation_id.replace('\n', '\\n').replace('\r', '\\r')
+            sanitized_msg_user = message_user_id.replace('\n', '\\n').replace('\r', '\\r')
             logger.warning(
-                f"Access denied: user {authenticated_user_id} tried to access "
-                f"conversation {conversation_id} owned by {message_user_id}"
+                f"Access denied: user {sanitized_auth_user} tried to access "
+                f"conversation {sanitized_conv_id} owned by {sanitized_msg_user}"
             )
 
         return has_access

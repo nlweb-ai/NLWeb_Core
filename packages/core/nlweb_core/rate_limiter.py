@@ -135,7 +135,9 @@ class RateLimiter:
             tokens_needed = 1 - bucket.tokens
             retry_after = int(tokens_needed / self.refill_rate)
             headers['Retry-After'] = str(retry_after)
-            logger.warning(f"Rate limit exceeded for {client_id}")
+            # Sanitize client_id for logging to prevent log injection
+            sanitized_client_id = client_id.replace('\n', '\\n').replace('\r', '\\r')
+            logger.warning(f"Rate limit exceeded for {sanitized_client_id}")
 
         return allowed, headers
 

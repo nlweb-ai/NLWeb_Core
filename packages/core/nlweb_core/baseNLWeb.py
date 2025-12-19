@@ -29,7 +29,10 @@ class NLWebHandler(ABC):
 
         # Generate and set request ID for this handler instance
         self.request_id = set_request_id()
-        logger.info(f"Initializing handler for query: {query_params.get('query', {}).get('text', 'N/A')[:50]}")
+        # Sanitize query text for logging to prevent log injection
+        query_text = query_params.get('query', {}).get('text', 'N/A')[:50]
+        sanitized_query = query_text.replace('\n', '\\n').replace('\r', '\\r')
+        logger.info(f"Initializing handler for query: {sanitized_query}")
 
         self.output_method = output_method
         self.query_params_raw = query_params  # Store raw params for conversation storage
