@@ -63,12 +63,14 @@ class NLWebChat {
             // Centered input (initial)
             centeredInput: document.getElementById('centered-chat-input'),
             centeredSendBtn: document.getElementById('centered-send-button'),
+            centeredProfileBtn: document.getElementById('centered-profile-button'),
             siteInput: document.getElementById('site-input'),
 
             // Follow-up input (bottom)
             chatInputContainer: document.querySelector('.chat-input-container'),
             chatInput: document.getElementById('chat-input'),
-            sendButton: document.getElementById('send-button')
+            sendButton: document.getElementById('send-button'),
+            profileButton: document.getElementById('profile-button')
         };
     }
 
@@ -90,6 +92,7 @@ class NLWebChat {
 
         // Centered input handlers
         this.elements.centeredSendBtn.onclick = () => this.sendQuery();
+        this.elements.centeredProfileBtn.onclick = () => this.sendProfileQuery();
         this.elements.centeredInput.onkeypress = (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -99,6 +102,7 @@ class NLWebChat {
 
         // Follow-up input handlers
         this.elements.sendButton.onclick = () => this.sendFollowupQuery();
+        this.elements.profileButton.onclick = () => this.sendFollowupProfileQuery();
         this.elements.chatInput.onkeypress = (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -280,6 +284,16 @@ class NLWebChat {
         await this.streamQuery(query, site);
     }
 
+    async sendProfileQuery() {
+        const query = this.elements.centeredInput.value.trim();
+        const site = this.elements.siteInput.value.trim() || this.defaultSite;
+
+        if (!query) return;
+
+        // Send profile request without updating conversation
+        await this.streamProfileQuery(query, site);
+    }
+
     async sendFollowupQuery() {
         const query = this.elements.chatInput.value.trim();
         if (!query || !this.currentConversation) return;
@@ -304,6 +318,16 @@ class NLWebChat {
 
         // Send to NLWeb
         await this.streamQuery(query, site);
+    }
+
+    async sendFollowupProfileQuery() {
+        const query = this.elements.chatInput.value.trim();
+        if (!query) return;
+
+        const site = this.currentConversation ? (this.currentConversation.site || this.defaultSite) : this.defaultSite;
+
+        // Send profile request without updating conversation
+        await this.streamProfileQuery(query, site);
     }
 
     async streamQuery(query, site) {
@@ -537,6 +561,81 @@ class NLWebChat {
                 this.renderMessages();
             }
             this.saveConversations();
+        }
+    }
+
+    async streamProfileQuery(query, site) {
+        try {
+            // Check if summarize checkbox is checked
+            const summarizeCheckbox = document.getElementById('summarize-checkbox');
+            const shouldSummarize = summarizeCheckbox && summarizeCheckbox.checked;
+            const mode = shouldSummarize ? 'list,summarize' : 'list';
+
+            // Build v0.54 request - same as streamQuery
+            const v054Request = {
+                query: {
+                    text: query,
+                    site: site,
+                    num_results: this.maxResults
+                },
+                prefer: {
+                    streaming: false,
+                    response_format: 'conv_search',
+                    mode: mode
+                },
+                meta: {
+                    api_version: '0.54'
+                }
+            };
+
+            // Add conversation context if available
+            if (this.conversationHistory.length > 0) {
+                v054Request.context = {
+                    '@type': 'ConversationalContext',
+                    prev: this.conversationHistory.slice(-5) // Last 5 queries
+                };
+            }
+
+            // Open new window for profile results
+            const profileWindow = window.open('', '_blank');
+            if (!profileWindow) {
+                alert('Please allow pop-ups to view profiling results');
+                return;
+            }
+
+            // Send POST request with X-Profile-Request header
+            const response = await fetch(`${this.baseUrl}/ask`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'text/event-stream',
+                    'X-Profile-Request': 'true'
+                },
+                body: JSON.stringify(v054Request)
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            // Read the entire response
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let fullResponse = '';
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                fullResponse += decoder.decode(value, { stream: true });
+            }
+
+            // Write the complete response to the profile window
+            profileWindow.document.write(fullResponse);
+            console.log('Profile stream complete');
+
+        } catch (error) {
+            console.error('Error during profile request:', error);
+            alert(`Profile request failed: ${error.message}`);
         }
     }
 

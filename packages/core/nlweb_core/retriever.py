@@ -22,6 +22,10 @@ _client_cache_locks = defaultdict(asyncio.Lock)  # Per-key locks instead of glob
 # Preloaded client modules
 _preloaded_modules = {}
 
+# Object lookup client cache
+_object_lookup_client = None
+_object_lookup_lock = asyncio.Lock()
+
 def init():
     """Initialize retrieval clients based on configuration."""
     # Preload modules for enabled endpoints using config-driven dynamic imports
@@ -61,6 +65,108 @@ class VectorDBClientInterface(ABC):
             List of search results, where each result is [url, json_str, name, site]
         """
         pass
+
+
+class ObjectLookupInterface(ABC):
+    """
+    Abstract base class for looking up full objects by their ID.
+    Implementations should fetch complete object data from storage (e.g., Cosmos DB).
+    """
+
+    @abstractmethod
+    async def get_by_id(self, object_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve a complete object by its ID.
+
+        Args:
+            object_id: The unique identifier for the object (e.g., URL/@id)
+
+        Returns:
+            Complete object as dictionary, or None if not found
+        """
+        pass
+
+
+async def get_object_lookup_client() -> Optional[ObjectLookupInterface]:
+    """
+    Get or create the object lookup client based on configuration.
+    Uses dynamic loading via import_path and class_name.
+    
+    Returns:
+        ObjectLookupInterface instance or None if not configured
+    """
+    global _object_lookup_client
+    
+    # Check if object storage is enabled
+    if not CONFIG.object_storage or not CONFIG.object_storage.enabled:
+        return None
+    
+    # If client is already created, return immediately.
+    if _object_lookup_client is not None:
+            return _object_lookup_client
+    
+    async with _object_lookup_lock:
+        if _object_lookup_client is None:
+            # Use dynamic import based on config
+            if not CONFIG.object_storage.import_path or not CONFIG.object_storage.class_name:
+                raise ValueError(
+                    f"Object storage config missing import_path or class_name for type: {CONFIG.object_storage.type}"
+                )
+            
+            try:
+                import_path = CONFIG.object_storage.import_path
+                class_name = CONFIG.object_storage.class_name
+                module = __import__(import_path, fromlist=[class_name])
+                client_class = getattr(module, class_name)
+                _object_lookup_client = client_class()
+            except ImportError as e:
+                raise ValueError(f"Failed to load object storage client: {e}")
+        
+        return _object_lookup_client
+
+
+async def enrich_results_from_object_storage(results: List[List[str]]) -> List[List[str]]:
+    """
+    Enrich vector DB results with full content from object storage.
+    Replaces the potentially empty content with complete object data from Cosmos DB.
+
+    Args:
+        results: Vector DB results in format [url, json_str, name, site]
+
+    Returns:
+        Enriched results with full content from object storage
+    """
+    client = await get_object_lookup_client()
+    if not client:
+        return results
+    enriched_results = []
+
+    # Control Concurrency: Allow max 20 parallel requests at a time
+    # Adjust this based on the RU capacity. 20-50 is usually safe for standard workloads.
+    semaphore = asyncio.Semaphore(20)
+
+    async def process_single_result(result):
+        """
+        Helper function to process one item.
+        """
+        url, json_str, name, site = result
+        
+        async with semaphore:
+            full_object = await client.get_by_id(url)
+
+        if full_object:
+            # Replace content with full object JSON
+            full_json_str = json.dumps(full_object)
+            return [url, full_json_str, name, site]
+        else:
+            # Keep original if not found
+            return result
+
+    tasks = [process_single_result(r) for r in results]
+
+    enriched_results = await asyncio.gather(*tasks)
+
+    return enriched_results
 
 
 
@@ -182,7 +288,7 @@ class VectorDBClient:
     
     
     async def search(self, query: str, site: Union[str, List[str]],
-                    num_results: int = 50, **kwargs) -> List[List[str]]:
+                    num_results: int = 50, enrich_from_storage: bool = True, **kwargs) -> List[List[str]]:
         """
         Search for documents matching the query and site.
 
@@ -190,6 +296,7 @@ class VectorDBClient:
             query: Search query string
             site: Site identifier or list of sites
             num_results: Maximum number of results to return
+            enrich_from_storage: If True, fetch full content from object storage (default: True)
             **kwargs: Additional parameters
 
         Returns:
@@ -197,6 +304,10 @@ class VectorDBClient:
         """
         client = await self.get_client()
         results = await client.search(query, site, num_results, **kwargs)
+        # Optionally enrich with full content from object storage
+        if enrich_from_storage:
+            results = await enrich_results_from_object_storage(results)
+        
         return results
 
 
@@ -239,6 +350,7 @@ async def search(query: str,
                 endpoint_name: Optional[str] = None,
                 query_params: Optional[Dict[str, Any]] = None,
                 handler: Optional[Any] = None,
+                enrich_from_storage: bool = True,
                 **kwargs) -> List[Dict[str, Any]]:
     """
     Simplified search interface that combines client creation and search in one call.
@@ -246,10 +358,11 @@ async def search(query: str,
     Args:
         query: The search query
         site: Site to search in (default: "all")
-        num_results: Number of results to return (default: 10)
+        num_results: Number of results to return (default: 50)
         endpoint_name: Optional name of the endpoint to use
         query_params: Optional query parameters for overriding endpoint
         handler: Optional handler with http_handler for sending messages
+        enrich_from_storage: If True, fetch full content from object storage (default: True)
         **kwargs: Additional parameters passed to the search method
         
     Returns:
@@ -260,8 +373,6 @@ async def search(query: str,
     """
     client = get_vector_db_client(endpoint_name=endpoint_name, query_params=query_params)
 
-    return await client.search(query, site, num_results, **kwargs)
-    
-    return results
+    return await client.search(query, site, num_results, enrich_from_storage=enrich_from_storage, **kwargs)
 
 

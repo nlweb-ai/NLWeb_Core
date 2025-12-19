@@ -154,6 +154,17 @@ class ConversationStorageConfig:
     knn: Optional[Dict[str, Any]] = None
 
 @dataclass
+class ObjectLookupConfig:
+    type: str  # "cosmos" only for now
+    enabled: bool = True
+    endpoint: Optional[str] = None
+    database_name: Optional[str] = None
+    container_name: Optional[str] = None
+    partition_key: Optional[str] = None
+    import_path: Optional[str] = None
+    class_name: Optional[str] = None
+
+@dataclass
 class StorageBehaviorConfig:
     store_anonymous: bool = True
     max_conversations_per_thread: int = 100
@@ -364,6 +375,25 @@ class AppConfig:
         # Conversation storage client will be initialized in server startup (init_app)
         # because it requires async initialization
         self.conversation_storage_client = None
+
+        if 'object_storage' in config:
+            obj_cfg = config['object_storage']
+            self.object_storage = ObjectLookupConfig(
+                type=obj_cfg.get('type', 'cosmos'),
+                enabled=obj_cfg.get('enabled', True),
+                endpoint=self._get_config_value(obj_cfg.get('endpoint_env')) if 'endpoint_env' in obj_cfg else obj_cfg.get('endpoint'),
+                database_name=obj_cfg.get('database_name'),
+                container_name=obj_cfg.get('container_name'),
+                partition_key=obj_cfg.get('partition_key'),
+                import_path=self._get_config_value(obj_cfg.get('import_path')),
+                class_name=self._get_config_value(obj_cfg.get('class_name'))
+            )
+        else:
+            # Default: object storage disabled
+            self.object_storage = ObjectLookupConfig(
+                type="cosmos",
+                enabled=False
+            )
 
         # Set defaults for other configs (not in unified format yet)
         self.port = config.get('port', 8080)
