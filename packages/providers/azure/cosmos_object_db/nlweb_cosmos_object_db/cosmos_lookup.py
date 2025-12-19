@@ -6,8 +6,10 @@ Azure Cosmos DB implementation for object lookup.
 """
 
 import asyncio
+import hashlib
 from typing import Dict, Any, Optional
 from azure.cosmos import CosmosClient
+from azure.cosmos.exceptions import CosmosResourceNotFoundError
 from azure.identity import DefaultAzureCredential
 
 from nlweb_core.retriever import ObjectLookupInterface
@@ -40,29 +42,29 @@ class CosmosObjectLookup(ObjectLookupInterface):
 
     async def get_by_id(self, object_id: str) -> Optional[Dict[str, Any]]:
         """
-        Retrieve object from Cosmos DB by @id field.
-
+        Retrieve object from Cosmos DB by @id field using a Point Read.
+        
         Args:
             object_id: The @id value (typically a URL)
-
+            
         Returns:
             Complete object dictionary or None if not found
         """
         try:
-            # Query by @id field
-            query = "SELECT * FROM c WHERE c['@id'] = @object_id"
-            parameters = [{"name": "@object_id", "value": object_id}]
+            # Re-calculate the deterministic hash to find the system 'id'
+            target_id = hashlib.sha256(object_id.encode('utf-8')).hexdigest()
 
-            # Execute query in executor to avoid blocking
-            def execute_query():
-                items = list(self.container.query_items(
-                    query=query,
-                    parameters=parameters,
-                    enable_cross_partition_query=True
-                ))
-                return items[0] if items else None
+            def execute_point_read():
+                try:
+                    # read_item is a direct key-value lookup (1 RU cost)
+                    return self.container.read_item(
+                        item=target_id, 
+                        partition_key=object_id  # The object_id (ie. URL of the object) is the partition key
+                    )
+                except CosmosResourceNotFoundError:
+                    return None
 
-            result = await asyncio.get_event_loop().run_in_executor(None, execute_query)
+            result = await asyncio.get_event_loop().run_in_executor(None, execute_point_read)
             return result
 
         except Exception as e:
