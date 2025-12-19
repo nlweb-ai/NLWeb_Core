@@ -19,7 +19,7 @@ from nlweb_core.embedding import get_embedding
 from nlweb_core.retriever import VectorDBClientInterface
 
 
-class QdrantClient(VectorDBClientInterface):
+class QdrantVectorClient(VectorDBClientInterface):
     """
     Client for Qdrant vector database operations, providing a unified interface for
     indexing, storing, and retrieving vector-based search results.
@@ -131,11 +131,11 @@ class QdrantClient(VectorDBClientInterface):
         try:
             params = self._create_client_params()
 
-            # Create client with the determined parameters
+            # Create async client
             client = AsyncQdrantClient(**params)
 
             # Test connection by getting collections
-            collections = await client.get_collections()
+            await client.get_collections()
 
             # Store in cache with lock
             with self._client_lock:
@@ -258,7 +258,7 @@ class QdrantClient(VectorDBClientInterface):
 
     def _format_results(self, search_result: List[models.ScoredPoint]) -> List[List[str]]:
         """
-        Format Qdrant search results to match expected API: [url, text_json, name, site].
+        Format Qdrant search results to match expected API: [url, content_json, type, site].
 
         Args:
             search_result: Qdrant search results
@@ -270,11 +270,12 @@ class QdrantClient(VectorDBClientInterface):
         for item in search_result:
             payload = item.payload
             url = payload.get("url", "")
-            schema = payload.get("schema_json", "")
-            name = payload.get("name", "")
+            # Content is stored as JSON string in Qdrant payload
+            content = payload.get("content", "")
+            type_name = payload.get("type", "")
             site_name = payload.get("site", "")
 
-            results.append([url, schema, name, site_name])
+            results.append([url, content, type_name, site_name])
 
         return results
 
@@ -298,11 +299,12 @@ class QdrantClient(VectorDBClientInterface):
             query_params: Additional query parameters
 
         Returns:
-            List[List[str]]: List of search results in format [url, text_json, name, site]
+            List[List[str]]: List of search results in format [url, content_json, type, site]
         """
         collection_name = collection_name or self.default_collection_name
 
         try:
+            # Embed the query using NLWeb's embedding function
             start_embed = time.time()
             embedding = await get_embedding(query, query_params=query_params)
             embed_time = time.time() - start_embed
@@ -314,24 +316,24 @@ class QdrantClient(VectorDBClientInterface):
             filter_condition = self._create_site_filter(site)
 
             # Ensure collection exists before searching
-            collection_created = await self.ensure_collection_exists(
-                collection_name, len(embedding)
+            if not await client.collection_exists(collection_name):
+                # Collection doesn't exist, return empty results
+                return []
+            
+            # Perform the search using async client query_points method
+            search_response = await client.query_points(
+                collection_name=collection_name,
+                query=embedding,
+                limit=num_results,
+                query_filter=filter_condition,
+                with_payload=True,  # Critical: fetches the content back
             )
-            if collection_created:
-                # Collection was just created, return empty results
-                results = []
-            else:
-                # Perform the search
-                search_result = await client.search(
-                    collection_name=collection_name,
-                    query_vector=embedding,
-                    limit=num_results,
-                    query_filter=filter_condition,
-                    with_payload=True,
-                )
+            
+            # Extract points from response
+            search_result = search_response.points
 
-                # Format the results
-                results = self._format_results(search_result)
+            # Format the results
+            results = self._format_results(search_result)
 
             retrieve_time = time.time() - start_retrieve
 
@@ -380,8 +382,8 @@ class QdrantClient(VectorDBClientInterface):
                 payload = item.payload
                 formatted_result = [
                     payload.get("url", ""),
-                    payload.get("schema_json", ""),
-                    payload.get("name", ""),
+                    payload.get("content", ""),  # Content as JSON string
+                    payload.get("type", ""),
                     payload.get("site", ""),
                 ]
 
