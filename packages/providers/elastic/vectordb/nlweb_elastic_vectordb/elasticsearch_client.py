@@ -12,7 +12,6 @@ from typing import List, Dict, Union, Optional, Any
 
 from elasticsearch import AsyncElasticsearch
 
-from nlweb_core.config import CONFIG
 from nlweb_core.embedding import get_embedding
 from nlweb_core.retriever import VectorDBClientInterface
 
@@ -23,36 +22,27 @@ class ElasticsearchClient(VectorDBClientInterface):
     retrieving vector-based search results.
     """
 
-    def __init__(self, endpoint_name: Optional[str] = None):
+    def __init__(self, endpoint_config):
         """
         Initialize the Elasticsearch client.
 
         Args:
-            endpoint_name: Name of the endpoint to use (defaults to preferred endpoint in CONFIG)
+            endpoint_config: Endpoint configuration object with api_endpoint, api_key, index_name, etc.
         """
         super().__init__()
-        self.endpoint_name = endpoint_name or CONFIG.write_endpoint
+        self.endpoint_config = endpoint_config
         self._client_lock = threading.Lock()
         self._es_clients = {}  # Cache for Elasticsearch clients
 
-        # Get endpoint configuration
-        self.endpoint_config = self._get_endpoint_config()
-
         # Handle None values from configuration
-        self.api_endpoint = self.endpoint_config.api_endpoint
-        self.api_key = self.endpoint_config.api_key
-        self.default_index_name = self.endpoint_config.index_name or "embeddings"
+        self.api_endpoint = endpoint_config.api_endpoint if hasattr(endpoint_config, 'api_endpoint') else None
+        self.api_key = endpoint_config.api_key if hasattr(endpoint_config, 'api_key') else None
+        self.default_index_name = endpoint_config.index_name if hasattr(endpoint_config, 'index_name') and endpoint_config.index_name else "embeddings"
 
         if self.api_endpoint is None:
-            raise ValueError(
-                f"API endpoint not configured for {self.endpoint_name}. "
-                f"Check environment variable configuration."
-            )
+            raise ValueError("API endpoint not configured. Check environment variable configuration.")
         if self.api_key is None:
-            raise ValueError(
-                f"API key not configured for {self.endpoint_name}. "
-                f"Check environment variable configuration."
-            )
+            raise ValueError("API key not configured. Check environment variable configuration.")
 
     async def __aenter__(self):
         """Async context manager entry"""
@@ -73,23 +63,6 @@ class ElasticsearchClient(VectorDBClientInterface):
             finally:
                 self._es_clients = {}
 
-    def _get_endpoint_config(self):
-        """Get the Elasticsearch endpoint configuration from CONFIG"""
-        endpoint_config = CONFIG.retrieval_endpoints.get(self.endpoint_name)
-
-        if not endpoint_config:
-            error_msg = f"No configuration found for endpoint {self.endpoint_name}"
-            raise ValueError(error_msg)
-
-        # Verify this is an Elasticsearch endpoint
-        if endpoint_config.db_type != "elasticsearch":
-            error_msg = (
-                f"Endpoint {self.endpoint_name} is not an Elasticsearch endpoint "
-                f"(type: {endpoint_config.db_type})"
-            )
-            raise ValueError(error_msg)
-
-        return endpoint_config
 
     def _create_client_params(self):
         """Extract client parameters from endpoint config."""

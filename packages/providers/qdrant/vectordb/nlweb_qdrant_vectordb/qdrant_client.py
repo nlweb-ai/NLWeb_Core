@@ -14,7 +14,6 @@ from typing import List, Dict, Union, Optional, Any
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.http import models
 
-from nlweb_core.config import CONFIG
 from nlweb_core.embedding import get_embedding
 from nlweb_core.retriever import VectorDBClientInterface
 
@@ -25,24 +24,23 @@ class QdrantVectorClient(VectorDBClientInterface):
     indexing, storing, and retrieving vector-based search results.
     """
 
-    def __init__(self, endpoint_name: Optional[str] = None):
+    def __init__(self, endpoint_config):
         """
         Initialize the Qdrant vector database client.
 
         Args:
-            endpoint_name: Name of the endpoint to use (defaults to preferred endpoint in CONFIG)
+            endpoint_config: Endpoint configuration object with api_endpoint, api_key, database_path, etc.
         """
         super().__init__()
-        self.endpoint_name = endpoint_name or CONFIG.write_endpoint
+        self.endpoint_config = endpoint_config
         self._client_lock = threading.Lock()
         self._qdrant_clients = {}  # Cache for Qdrant clients
 
-        # Get endpoint configuration
-        self.endpoint_config = self._get_endpoint_config()
-        self.api_endpoint = self.endpoint_config.api_endpoint
-        self.api_key = self.endpoint_config.api_key
-        self.database_path = self.endpoint_config.database_path
-        self.default_collection_name = self.endpoint_config.index_name or "nlweb_collection"
+        # Extract configuration
+        self.api_endpoint = endpoint_config.api_endpoint if hasattr(endpoint_config, 'api_endpoint') else None
+        self.api_key = endpoint_config.api_key if hasattr(endpoint_config, 'api_key') else None
+        self.database_path = endpoint_config.database_path if hasattr(endpoint_config, 'database_path') else None
+        self.default_collection_name = endpoint_config.index_name if hasattr(endpoint_config, 'index_name') else "nlweb_collection"
 
         if self.api_endpoint:
             pass  # Using remote Qdrant
@@ -51,24 +49,6 @@ class QdrantVectorClient(VectorDBClientInterface):
         else:
             # Default to local path if neither is specified
             self.database_path = self._resolve_path("../data/db")
-
-    def _get_endpoint_config(self):
-        """Get the Qdrant endpoint configuration from CONFIG"""
-        endpoint_config = CONFIG.retrieval_endpoints.get(self.endpoint_name)
-
-        if not endpoint_config:
-            error_msg = f"No configuration found for endpoint {self.endpoint_name}"
-            raise ValueError(error_msg)
-
-        # Verify this is a Qdrant endpoint
-        if endpoint_config.db_type != "qdrant":
-            error_msg = (
-                f"Endpoint {self.endpoint_name} is not a Qdrant endpoint "
-                f"(type: {endpoint_config.db_type})"
-            )
-            raise ValueError(error_msg)
-
-        return endpoint_config
 
     def _resolve_path(self, path: str) -> str:
         """

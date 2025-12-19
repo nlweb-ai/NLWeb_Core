@@ -12,16 +12,27 @@ Backwards compatibility is not guaranteed at this time.
 from abc import ABC, abstractmethod
 import asyncio
 import uuid
-from datetime import datetime
+import logging
+from datetime import datetime, timezone
 from typing import Optional
 from nlweb_core.query_analysis.query_analysis import DefaultQueryAnalysisHandler, QueryAnalysisHandler, query_analysis_tree
 from nlweb_core.utils import get_param as _get_param
 from nlweb_core.protocol.models import Query, Context, Prefer, Meta, AskRequest
 from nlweb_core.config import CONFIG
+from nlweb_core.request_context import set_request_id, get_request_id
+
+logger = logging.getLogger(__name__)
 
 class NLWebHandler(ABC):
 
     def __init__(self, query_params, output_method):
+
+        # Generate and set request ID for this handler instance
+        self.request_id = set_request_id()
+        # Sanitize query text for logging to prevent log injection
+        query_text = query_params.get('query', {}).get('text', 'N/A')[:50]
+        sanitized_query = query_text.replace('\n', '\\n').replace('\r', '\\r')
+        logger.info(f"Initializing handler for query: {sanitized_query}")
 
         self.output_method = output_method
         self.query_params_raw = query_params  # Store raw params for conversation storage
@@ -58,7 +69,8 @@ class NLWebHandler(ABC):
         self.return_value = None
         self._meta = {
             'version': '0.54',
-            'response_type': 'Answer'
+            'response_type': 'Answer',
+            'request_id': self.request_id  # Include request ID in response metadata
         }
     
     async def runQuery(self):
@@ -81,7 +93,7 @@ class NLWebHandler(ABC):
     async def decontextualizeQuery(self):
         """
         Decontextualize the query using conversation context.
-        Sets self.query.decontextualized_text with the processed query.
+        Sets self.query.decontextualized_query with the processed query.
         """
         # Get context information from protocol objects
         prev_queries = self.context.prev or []
@@ -97,7 +109,7 @@ class NLWebHandler(ABC):
 
         if len(prev_queries) == 0 and context_text is None:
             # No context - use original query
-            self.query.decontextualized_text = self.query.text
+            self.query.decontextualized_query = self.query.text
         elif len(prev_queries) > 0 and context_text is None:
             # Decontextualize using previous queries
             self.query_params["request.previousQueries"] = ", ".join(prev_queries)
@@ -105,9 +117,9 @@ class NLWebHandler(ABC):
             result = await DefaultQueryAnalysisHandler(self, prompt_ref="PrevQueryDecontextualizer", root_node=query_analysis_tree).do()
 
             if result and "decontextualized_query" in result:
-                self.query.decontextualized_text = result["decontextualized_query"]
+                self.query.decontextualized_query = result["decontextualized_query"]
             else:
-                self.query.decontextualized_text = self.query.text
+                self.query.decontextualized_query = self.query.text
         else:
             # Decontextualize using both prev queries and context text
             self.query_params["request.previousQueries"] = ", ".join(prev_queries) if prev_queries else ""
@@ -115,10 +127,11 @@ class NLWebHandler(ABC):
 
             result = await DefaultQueryAnalysisHandler(self, prompt_ref="FullContextDecontextualizer", root_node=query_analysis_tree).do()
             if result and "decontextualized_query" in result:
-                self.query.decontextualized_text = result["decontextualized_query"]
+                self.query.decontextualized_query = result["decontextualized_query"]
             else:
-                self.query.decontextualized_text = self.query.text
-    
+                self.query.decontextualized_query = self.query.text
+
+
     def set_meta_attribute(self, key, value):
         """Set a metadata attribute in the _meta object."""
         self._meta[key] = value
@@ -241,67 +254,47 @@ class NLWebHandler(ABC):
 
     def _init_conversation_storage(self):
         """Initialize conversation storage if enabled."""
-        if not hasattr(CONFIG, 'conversation_storage'):
-            return
+        # Get storage client from CONFIG (initialized when config was loaded)
+        if hasattr(CONFIG, 'conversation_storage_client'):
+            self.conversation_storage = CONFIG.conversation_storage_client
+        else:
+            self.conversation_storage = None
 
-        if not CONFIG.conversation_storage.enabled:
-            return
-
-        try:
-            from nlweb_core.conversation.storage import ConversationStorageClient
-            self.conversation_storage = ConversationStorageClient()
-        except Exception as e:
-            # If storage init fails, just continue without it
-            pass
-
-    async def save_user_message(self):
-        """Save the user's query message to conversation storage."""
+    async def save_conversation_turn(self):
+        """Save the complete conversation turn (user request + assistant response)."""
         if not self.conversation_storage:
             return
 
-        try:
-            from nlweb_core.conversation.models import ConversationMessage
+        # Only save if meta.remember is explicitly set to True
+        if not (self.meta and hasattr(self.meta, 'remember') and self.meta.remember):
+            return
 
-            # Build AskRequest from raw params
-            request = AskRequest(**self.query_params_raw)
-
-            message = ConversationMessage(
-                message_id=str(uuid.uuid4()),
-                conversation_id=self.conversation_id,
-                role="user",
-                timestamp=datetime.utcnow(),
-                request=request,
-                metadata={
-                    "user_id": self.user_id,
-                    "site": getattr(self.query, 'site', None)
-                }
-            )
-
-            await self.conversation_storage.store_message(message)
-        except Exception as e:
-            # Don't fail the query if storage fails
-            pass
-
-    async def save_assistant_message(self, results: list):
-        """Save the assistant's results to conversation storage."""
-        if not self.conversation_storage:
+        # Don't save if no user_id (anonymous conversations)
+        if not self.user_id:
             return
 
         try:
             from nlweb_core.conversation.models import ConversationMessage
             from nlweb_core.protocol.models import ResultObject
 
-            # Convert result dicts to ResultObject models
-            result_objects = [ResultObject(**r) if isinstance(r, dict) else r for r in results]
+            # Build AskRequest from raw params
+            request = AskRequest(**self.query_params_raw)
+
+            # Get results if available
+            results = None
+            if hasattr(self, 'final_ranked_answers') and self.final_ranked_answers:
+                # Convert result dicts to ResultObject models
+                results = [ResultObject(**r) if isinstance(r, dict) else r for r in self.final_ranked_answers]
 
             message = ConversationMessage(
                 message_id=str(uuid.uuid4()),
                 conversation_id=self.conversation_id,
-                role="assistant",
-                timestamp=datetime.utcnow(),
-                results=result_objects,
+                timestamp=datetime.now(timezone.utc),
+                request=request,
+                results=results,
                 metadata={
                     "user_id": self.user_id,
+                    "site": getattr(self.query, 'site', None),
                     "response_format": self.prefer.response_format
                 }
             )
@@ -309,4 +302,4 @@ class NLWebHandler(ABC):
             await self.conversation_storage.store_message(message)
         except Exception as e:
             # Don't fail the query if storage fails
-            pass
+            logger.error(f"Failed to save conversation turn: {e}", exc_info=True)

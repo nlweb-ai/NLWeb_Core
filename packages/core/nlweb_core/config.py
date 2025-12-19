@@ -11,9 +11,12 @@ Backwards compatibility is not guaranteed at this time.
 import os
 import yaml
 import xml.etree.ElementTree as ET
+import logging
 from dataclasses import dataclass, field
 from dotenv import load_dotenv
 from typing import Dict, Optional, Any, List
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class SiteConfig:
@@ -128,6 +131,7 @@ class ConversationStorageConfig:
     url: Optional[str] = None
     endpoint: Optional[str] = None
     database_path: Optional[str] = None
+    auth_method: Optional[str] = None  # "api_key", "azure_ad"
     # Names
     collection_name: Optional[str] = None
     database_name: Optional[str] = None
@@ -244,9 +248,9 @@ class AppConfig:
             if 'scoring-llm-model' in config:
                 self.scoring_llm_model = self._parse_llm_model_config(config['scoring-llm-model'])
 
-            # Keep old llm_endpoints empty for new format
-            self.preferred_llm_endpoint = None
+            # Set empty llm_endpoints for new format (old format compatibility removed)
             self.llm_endpoints = {}
+            self.preferred_llm_endpoint = "azure_openai"
 
         elif 'llm' in config:
             # Old format for backward compatibility
@@ -332,15 +336,26 @@ class AppConfig:
         # Load conversation storage config from unified file
         if 'conversation_storage' in config:
             conv_cfg = config['conversation_storage']
+
+            # Parse auth_method
+            auth_method = conv_cfg.get('auth_method', 'api_key')
+
             self.conversation_storage = ConversationStorageConfig(
                 type=conv_cfg.get('type', 'qdrant'),
                 enabled=conv_cfg.get('enabled', True),
-                # Support both URL and endpoint
+                # Connection string (for Azure Table Storage with shared key)
+                connection_string=self._get_config_value(conv_cfg.get('connection_string_env')) if 'connection_string_env' in conv_cfg else conv_cfg.get('connection_string'),
+                # Account name (for Azure Table Storage with Azure AD) - reuse 'host' field
+                host=conv_cfg.get('account_name'),
+                # Support both URL and endpoint (for Cosmos/Qdrant)
                 url=self._get_config_value(conv_cfg.get('url_env')) if 'url_env' in conv_cfg else conv_cfg.get('url'),
                 endpoint=self._get_config_value(conv_cfg.get('endpoint_env')) if 'endpoint_env' in conv_cfg else conv_cfg.get('endpoint'),
                 # API key
                 api_key=self._get_config_value(conv_cfg.get('api_key_env')) if 'api_key_env' in conv_cfg else conv_cfg.get('api_key'),
-                # Database/collection names
+                # Auth method
+                auth_method=conv_cfg.get('auth_method', 'api_key'),
+                # Names (table_name for Azure Table, collection_name for Qdrant, container_name for Cosmos)
+                table_name=conv_cfg.get('table_name'),
                 database_path=self._resolve_path(conv_cfg['database_path']) if 'database_path' in conv_cfg else None,
                 collection_name=conv_cfg.get('collection_name'),
                 database_name=conv_cfg.get('database_name'),
@@ -356,6 +371,10 @@ class AppConfig:
                 database_path=self._resolve_path("../data/conversations_db"),
                 collection_name="nlweb_conversations"
             )
+
+        # Conversation storage client will be initialized in server startup (init_app)
+        # because it requires async initialization
+        self.conversation_storage_client = None
 
         if 'object_storage' in config:
             obj_cfg = config['object_storage']
@@ -382,6 +401,7 @@ class AppConfig:
         self.mode = config.get('mode', "production")
         self.homepage = config.get('homepage', "static/index.html")
         self.nlweb_gateway = config.get('nlweb_gateway', "nlwm.azurewebsites.net")
+        self.test_user = os.getenv('TEST_USER', 'anonymous')
 
         # Server config defaults
         server_cfg = config.get('server', {})
@@ -397,11 +417,16 @@ class AppConfig:
 
     def _parse_llm_model_config(self, cfg: dict) -> LLMModelConfig:
         """Helper method to parse LLM model configuration from dict."""
+        endpoint_env_key = cfg.get('endpoint_env')
+        endpoint_value = self._get_config_value(endpoint_env_key)
+        api_key_env_key = cfg.get('api_key_env')
+        api_key_value = self._get_config_value(api_key_env_key)
+
         return LLMModelConfig(
             llm_type=self._get_config_value(cfg.get('llm_type', 'azure_openai')),
             model=self._get_config_value(cfg.get('model')),
-            api_key=self._get_config_value(cfg.get('api_key_env')),
-            endpoint=self._get_config_value(cfg.get('endpoint_env')),
+            api_key=api_key_value,
+            endpoint=endpoint_value,
             api_version=self._get_config_value(cfg.get('api_version')),
             auth_method=self._get_config_value(cfg.get('auth_method'), 'api_key'),
             import_path=self._get_config_value(cfg.get('import_path')),
@@ -469,15 +494,16 @@ class AppConfig:
         """
         if value is None:
             return default
-            
+
         if isinstance(value, str):
             # If it's clearly an environment variable name (e.g., "OPENAI_API_KEY_ENV")
             if value.endswith('_ENV') or value.isupper():
-                return os.getenv(value, default)
+                env_value = os.getenv(value, default)
+                return env_value
             # Otherwise, treat it as a literal string value
             else:
                 return value
-        
+
         # For non-string values, return as-is
         return value
 

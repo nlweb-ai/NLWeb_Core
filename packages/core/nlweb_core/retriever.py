@@ -12,11 +12,12 @@ import asyncio
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, Union, Tuple, Type
 import json
+from collections import defaultdict
 from nlweb_core.config import CONFIG
 
 # Client cache for reusing instances
 _client_cache = {}
-_client_cache_lock = asyncio.Lock()
+_client_cache_locks = defaultdict(asyncio.Lock)  # Per-key locks instead of global lock
 
 # Preloaded client modules
 _preloaded_modules = {}
@@ -250,8 +251,13 @@ class VectorDBClient:
         # Use cache key combining db_type and endpoint
         cache_key = f"{self.db_type}_{self.endpoint_name}"
 
-        # Check if client already exists in cache
-        async with _client_cache_lock:
+        # Fast path - check cache without lock
+        if cache_key in _client_cache:
+            return _client_cache[cache_key]
+
+        # Slow path - acquire per-key lock for client creation
+        async with _client_cache_locks[cache_key]:
+            # Double-check after acquiring lock (another task may have created it)
             if cache_key in _client_cache:
                 return _client_cache[cache_key]
 
@@ -271,8 +277,8 @@ class VectorDBClient:
                     error_msg = f"No import_path and class_name configured for: {self.db_type}"
                     raise ValueError(error_msg)
 
-                # Instantiate the client
-                client = client_class(self.endpoint_name)
+                # Instantiate the client with endpoint configuration
+                client = client_class(self.endpoint_config)
             except ImportError as e:
                 raise ValueError(f"Failed to load client for {self.db_type}: {e}")
 

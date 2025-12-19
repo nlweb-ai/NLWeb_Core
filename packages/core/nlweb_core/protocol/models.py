@@ -21,7 +21,7 @@ class Query(BaseModel):
     - text: The natural language query string
 
     Optional internal field:
-    - decontextualized_text: Decontextualized version after processing context
+    - decontextualized_query: Decontextualized version after processing context
 
     Additional fields (site, itemType, location, price, num_results, etc.) are allowed
     and accessible via attribute access (e.g., query.site) or model_dump().
@@ -29,7 +29,7 @@ class Query(BaseModel):
     model_config = ConfigDict(extra='allow')
 
     text: str = Field(..., description='Natural language query from user (required)')
-    decontextualized_text: Optional[str] = Field(
+    decontextualized_query: Optional[str] = Field(
         None,
         description='Decontextualized version of the query after processing context (internal use)'
     )
@@ -37,9 +37,12 @@ class Query(BaseModel):
 
 class Context(BaseModel):
     """Context section - provides contextual information about the query."""
-    field_type: Optional[str] = Field(
+    model_config = ConfigDict(populate_by_name=True, ser_json_by_alias=True)
+
+    schema_type: Optional[str] = Field(
         "ConversationalContext",
         alias='@type',
+        serialization_alias='@type',
         description='Type of Context, determines attributes and semantics (default: ConversationalContext)',
     )
     prev: Optional[List[str]] = Field(
@@ -97,6 +100,12 @@ class Meta(BaseModel):
     )
     session_context: Optional[SessionContext] = Field(
         None, description='Session state context (optional)'
+    )
+    user: Optional[Dict[str, Any]] = Field(
+        None, description='User identifier object (optional)'
+    )
+    remember: Optional[bool] = Field(
+        None, description='Whether to remember this interaction in conversation history (optional)'
     )
 
 
@@ -164,14 +173,18 @@ class Grounding(BaseModel):
 
 class Action(BaseModel):
     """Action definition for result objects."""
-    field_context: Optional[str] = Field(
+    model_config = ConfigDict(populate_by_name=True, ser_json_by_alias=True)
+
+    schema_context: Optional[str] = Field(
         None,
         alias='@context',
+        serialization_alias='@context',
         description='Schema context (e.g., http://schema.org/) (optional)',
     )
-    field_type: Optional[str] = Field(
+    schema_type: Optional[str] = Field(
         None,
         alias='@type',
+        serialization_alias='@type',
         description='Action type using schema.org vocabulary (e.g., AddToCartAction) (optional)',
     )
     name: Optional[str] = Field(
@@ -196,11 +209,12 @@ class Action(BaseModel):
 
 class ResultObject(BaseModel):
     """Individual result object with semi-structured data."""
-    model_config = ConfigDict(extra='allow')
+    model_config = ConfigDict(extra='allow', populate_by_name=True, ser_json_by_alias=True)
 
-    field_type: Optional[str] = Field(
+    schema_type: Optional[str] = Field(
         None,
         alias='@type',
+        serialization_alias='@type',
         description='Object type using schema.org vocabulary (e.g., Restaurant, Movie, Product, Recipe) (optional)',
     )
     grounding: Optional[Grounding] = Field(
@@ -330,9 +344,12 @@ class AwaitRequest(BaseModel):
 # ============================================================================
 
 class Agent(BaseModel):
-    field_type: str = Field(
+    model_config = ConfigDict(populate_by_name=True, ser_json_by_alias=True)
+
+    schema_type: str = Field(
         ...,
         alias='@type',
+        serialization_alias='@type',
         description='Type of agent, e.g., "Search Agent" or "Analytics Agent". (required)',
     )
     agentSpec: Dict[str, Any] = Field(

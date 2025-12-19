@@ -10,8 +10,14 @@ Backwards compatibility is not guaranteed at this time.
 
 from nlweb_core.utils import trim_json, fill_prompt_variables
 from nlweb_core.llm import ask_llm
+from nlweb_core.llm_exceptions import (
+    LLMError, LLMTimeoutError, LLMRateLimitError, LLMConnectionError
+)
 import asyncio
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def log(message):
@@ -211,6 +217,7 @@ The user's question is: {request.query}. The item's description is {item.descrip
         self.items = items
         self.num_results_sent = 0
         self.rankedAnswers = []
+        self._send_lock = asyncio.Lock()  # Prevent race condition in concurrent sends
 
     async def rankItem(self, url, json_str, name, site):
         try:
@@ -219,7 +226,7 @@ The user's question is: {request.query}. The item's description is {item.descrip
 
             # Populate the missing keys needed by the prompt template
             # The prompt template uses {request.query} and {site.itemType}
-            self.handler.query_params["request.query"] = self.handler.query
+            self.handler.query_params["request.query"] = self.handler.query.text
             self.handler.query_params["site.itemType"] = (
                 "item"  # Default to "item" if not specified
             )
@@ -265,7 +272,9 @@ The user's question is: {request.query}. The item's description is {item.descrip
             # Add grounding with the url or @id from schema_object
             grounding_url = schema_object.get("url") or schema_object.get("@id")
             if grounding_url:
-                result["grounding"] = grounding_url
+                result["grounding"] = {
+                    "source_urls": [grounding_url]
+                }
 
             # Add to ranked answers
             self.rankedAnswers.append(result)
@@ -284,23 +293,42 @@ The user's question is: {request.query}. The item's description is {item.descrip
                         "max_results", int, self.NUM_RESULTS_TO_SEND
                     )
 
-                    # Check if we can still send more results
-                    if self.num_results_sent < max_results:
-                        await self.handler.send_results([result])
-                        result["sent"] = True
-                        self.num_results_sent += 1
+                    # ATOMIC: Check and send with lock to prevent race condition
+                    async with self._send_lock:
+                        if self.num_results_sent < max_results:
+                            await self.handler.send_results([result])
+                            result["sent"] = True
+                            self.num_results_sent += 1
 
                 except (BrokenPipeError, ConnectionResetError):
                     self.handler.connection_alive_event.clear()
                     return
 
-        except Exception as e:
-            import traceback
+        except LLMTimeoutError as e:
+            # Timeout is expected occasionally - log at warning level
+            logger.warning(f"LLM timeout ranking {url}: {e}")
+            # Don't fail the whole ranking - just skip this item
 
-            traceback.print_exc()
+        except LLMRateLimitError as e:
+            # Rate limit - log and skip, might want to implement backoff in future
+            logger.warning(f"LLM rate limit hit ranking {url}: {e}")
+
+        except LLMConnectionError as e:
+            # Connection issues - transient, log and skip
+            logger.warning(f"LLM connection error ranking {url}: {e}")
+
+        except LLMError as e:
+            # Other LLM errors - log at error level
+            logger.error(f"LLM error ranking {url}: {e}", exc_info=True)
             # Import here to avoid circular import
             from nlweb_core.config import CONFIG
+            if CONFIG.should_raise_exceptions():
+                raise  # Re-raise in testing/development mode
 
+        except Exception as e:
+            # Non-LLM errors - log and potentially re-raise
+            logger.error(f"Ranking failed for {url}: {e}", exc_info=True)
+            from nlweb_core.config import CONFIG
             if CONFIG.should_raise_exceptions():
                 raise  # Re-raise in testing/development mode
 

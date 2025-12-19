@@ -11,9 +11,9 @@ Backwards compatibility is not guaranteed at this time.
 from abc import ABC, abstractmethod
 from typing import List, Optional
 import importlib
+import threading
 
 from nlweb_core.conversation.models import ConversationMessage
-from nlweb_core.config import CONFIG
 
 
 class ConversationStorageInterface(ABC):
@@ -81,22 +81,26 @@ class ConversationStorageClient:
     Client that routes to appropriate storage backend based on configuration.
     """
 
-    def __init__(self, backend: Optional[ConversationStorageInterface] = None):
+    def __init__(self, storage_config=None, backend: Optional[ConversationStorageInterface] = None):
         """
         Initialize storage client.
 
         Args:
+            storage_config: Storage configuration object (e.g., from CONFIG.conversation_storage)
             backend: Optional backend override for testing. If not provided,
-                    creates backend from CONFIG.conversation_storage
+                    creates backend from storage_config
         """
         if backend is not None:
             self.backend = backend
         else:
-            self.backend = self._create_backend_from_config()
+            self.backend = self._create_backend_from_config(storage_config)
 
-    def _create_backend_from_config(self) -> ConversationStorageInterface:
+    def _create_backend_from_config(self, storage_config) -> ConversationStorageInterface:
         """
         Create the appropriate storage backend from configuration.
+
+        Args:
+            storage_config: Storage configuration object
 
         Returns:
             Storage backend instance
@@ -104,10 +108,8 @@ class ConversationStorageClient:
         Raises:
             ValueError: If backend type is unknown or not enabled
         """
-        if not hasattr(CONFIG, 'conversation_storage'):
-            raise ValueError("No conversation_storage configuration found")
-
-        storage_config = CONFIG.conversation_storage
+        if storage_config is None:
+            raise ValueError("No conversation_storage configuration provided")
 
         if not storage_config.enabled:
             raise ValueError("Conversation storage is not enabled in configuration")
@@ -116,8 +118,9 @@ class ConversationStorageClient:
 
         # Map backend types to modules
         backend_map = {
-            "memory": "nlweb_core.conversation.backends.memory.MemoryStorage",
             "qdrant": "nlweb_core.conversation.backends.qdrant.QdrantStorage",
+            "azure_table": "nlweb_core.conversation.backends.azure_table.AzureTableStorage",
+            "postgres": "nlweb_core.conversation.backends.postgres.PostgresStorage",
         }
 
         if backend_type not in backend_map:

@@ -39,7 +39,7 @@ class VectorDBRetriever:
         """
         # Get search parameters from handler
         # Use decontextualized query text if available, otherwise use original
-        query_text = self.handler.query.decontextualized_text or self.handler.query.text
+        query_text = self.handler.query.decontextualized_query or self.handler.query.text
         site = getattr(self.handler.query, 'site', None) or 'all'
         num_results = getattr(self.handler.query, 'num_results', None) or 50
 

@@ -40,6 +40,14 @@ async def health_handler(request):
     return web.json_response({"status": "ok"})
 
 
+async def config_handler(request):
+    """Expose client configuration."""
+    from nlweb_core.config import CONFIG
+    return web.json_response({
+        "test_user": CONFIG.test_user
+    })
+
+
 async def ask_handler(request):
     """
     Handle /ask requests (both GET and POST).
@@ -223,15 +231,51 @@ async def profile_request(app, handler):
     return middleware
 
 
+async def init_app(app):
+    """Initialize conversation storage on startup."""
+    from nlweb_core.config import CONFIG
+
+    # Initialize conversation storage on startup if enabled
+    if hasattr(CONFIG, 'conversation_storage') and CONFIG.conversation_storage.enabled:
+        try:
+            from nlweb_core.conversation.storage import ConversationStorageClient
+            storage = ConversationStorageClient(CONFIG.conversation_storage)
+            # Initialize pool and schema on startup to avoid first-request latency
+            await storage.backend.initialize()
+            app['conversation_storage'] = storage
+            # Also set in CONFIG so handlers can access it
+            CONFIG.conversation_storage_client = storage
+            print("Conversation storage initialized on startup")
+        except Exception as e:
+            print(f"Failed to initialize conversation storage: {e}")
+            import traceback
+            traceback.print_exc()
+
+
+async def cleanup_app(app):
+    """Cleanup conversation storage on shutdown."""
+    if 'conversation_storage' in app:
+        try:
+            await app['conversation_storage'].backend.close()
+            print("Conversation storage closed")
+        except Exception as e:
+            print(f"Error closing conversation storage: {e}")
+
+
 def create_app():
     """Create and configure the aiohttp application."""
     app = web.Application(middlewares=[profile_request])
+
+    # Add startup and cleanup hooks
+    app.on_startup.append(init_app)
+    app.on_cleanup.append(cleanup_app)
 
     # Add HTTP routes
     app.router.add_get("/ask", ask_handler)
     app.router.add_post("/ask", ask_handler)
     app.router.add_post("/await", await_handler)
     app.router.add_get("/health", health_handler)
+    app.router.add_get("/config", config_handler)
 
     # Add MCP routes
     app.router.add_post("/mcp", mcp_handler)  # MCP StreamableHTTP (JSON-RPC over HTTP)
