@@ -100,6 +100,10 @@ async def get_object_lookup_client() -> Optional[ObjectLookupInterface]:
     if not CONFIG.object_storage or not CONFIG.object_storage.enabled:
         return None
     
+    # If client is already created, return immediately.
+    if _object_lookup_client is not None:
+            return _object_lookup_client
+    
     async with _object_lookup_lock:
         if _object_lookup_client is None:
             # Use dynamic import based on config
@@ -135,20 +139,32 @@ async def enrich_results_from_object_storage(results: List[List[str]]) -> List[L
     if not client:
         return results
     enriched_results = []
-    for result in results:
+
+    # Control Concurrency: Allow max 20 parallel requests at a time
+    # Adjust this based on the RU capacity. 20-50 is usually safe for standard workloads.
+    semaphore = asyncio.Semaphore(20)
+
+    async def process_single_result(result):
+        """
+        Helper function to process one item.
+        """
         url, json_str, name, site = result
         
-        # Fetch full object from Cosmos DB using URL as @id
-        full_object = await client.get_by_id(url)
-        
+        async with semaphore:
+            full_object = await client.get_by_id(url)
+
         if full_object:
             # Replace content with full object JSON
             full_json_str = json.dumps(full_object)
-            enriched_results.append([url, full_json_str, name, site])
+            return [url, full_json_str, name, site]
         else:
-            # Keep original if not found in object storage
-            enriched_results.append(result)
-    
+            # Keep original if not found
+            return result
+
+    tasks = [process_single_result(r) for r in results]
+
+    enriched_results = await asyncio.gather(*tasks)
+
     return enriched_results
 
 
