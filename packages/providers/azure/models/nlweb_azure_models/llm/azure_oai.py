@@ -11,7 +11,6 @@ Code for calling Azure Open AI endpoints for LLM functionality.
 import json
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 from openai import AsyncAzureOpenAI
-from nlweb_core.config import CONFIG
 import asyncio
 import threading
 from typing import Dict, Any, Optional
@@ -20,97 +19,34 @@ from nlweb_core.llm import LLMProvider
 
 class AzureOpenAIProvider(LLMProvider):
     """Implementation of LLMProvider for Azure OpenAI."""
-    
+
     # Global client with thread-safe initialization
     _client_lock = threading.Lock()
     _client = None
 
-
     @classmethod
-    def get_azure_endpoint(cls) -> str:
-        """Get the Azure OpenAI endpoint from configuration."""
-        provider_config = CONFIG.llm_endpoints.get("azure_openai")
-        if provider_config and provider_config.endpoint:
-            endpoint = provider_config.endpoint
-            if endpoint:
-                endpoint = endpoint.strip('"')  # Remove quotes if present
-                return endpoint
-        return None
-
-    @classmethod
-    def get_api_key(cls) -> str:
-        """Get the Azure OpenAI API key from configuration."""
-        provider_config = CONFIG.llm_endpoints.get("azure_openai")
-        if provider_config and provider_config.api_key:
-            api_key = provider_config.api_key
-            if api_key:
-                api_key = api_key.strip('"')  # Remove quotes if present
-                return api_key
-        return None
-
-    @classmethod
-    def get_auth_method(cls) -> str:
-        """Get the authentication method from configuration."""
-        provider_config = CONFIG.llm_endpoints.get("azure_openai")
-        if provider_config and provider_config.auth_method:
-            return provider_config.auth_method
-        # Default to api_key
-        return "api_key"
-
-    @classmethod
-    def get_api_version(cls) -> str:
-        """Get the Azure OpenAI API version from configuration."""
-        provider_config = CONFIG.llm_endpoints.get("azure_openai")
-        if provider_config and provider_config.api_version:
-            api_version = provider_config.api_version
-            return api_version
-        # Default value if not found in config
-        default_version = "2024-02-01"
-        return default_version
-
-    @classmethod
-    def get_model_from_config(cls, high_tier=False) -> str:
-        """Get the appropriate model from configuration based on tier."""
-        provider_config = CONFIG.llm_endpoints.get("azure_openai")
-        if provider_config and provider_config.models:
-            model_name = provider_config.models.high if high_tier else provider_config.models.low
-            if model_name:
-                return model_name
-        # Default values if not found
-        default_model = "gpt-4.1" if high_tier else "gpt-4.1-mini"
-        return default_model
-
-    @classmethod
-    def get_client(cls, endpoint: Optional[str] = None, api_key: Optional[str] = None,
-                   api_version: Optional[str] = None, auth_method: Optional[str] = None) -> AsyncAzureOpenAI:
+    def get_client(cls, endpoint: str, api_key: str, api_version: str, auth_method: str = "api_key") -> AsyncAzureOpenAI:
         """
         Get or initialize the Azure OpenAI client.
 
         Args:
-            endpoint: Azure OpenAI endpoint URL (overrides config)
-            api_key: API key (overrides config)
-            api_version: API version (overrides config)
-            auth_method: Authentication method (overrides config)
+            endpoint: Azure OpenAI endpoint URL (required)
+            api_key: API key (required)
+            api_version: API version (required)
+            auth_method: Authentication method (required)
 
         Returns:
             Configured AsyncAzureOpenAI client
         """
-        # Use provided parameters or fall back to config
-        endpoint = endpoint or cls.get_azure_endpoint()
-        api_version = api_version or cls.get_api_version()
-        auth_method = auth_method or cls.get_auth_method()
-        if api_key is None:
-            api_key = cls.get_api_key()
-
         if not endpoint or not api_version:
-            error_msg = "Missing required Azure OpenAI configuration (endpoint or api_version)"
+            error_msg = f"Missing required Azure OpenAI configuration - endpoint: {endpoint}, api_version: {api_version}"
             raise ValueError(error_msg)
 
-        # For parameter-based calls, create a new client each time (no caching)
+        # Create client with the resolved endpoint/api_version
         with cls._client_lock:  # Thread-safe client initialization
-            if cls._client is None or endpoint != cls.get_azure_endpoint():
+            # Always create a new client if we don't have one, or if the endpoint changed
+            if cls._client is None or not hasattr(cls, '_last_endpoint') or cls._last_endpoint != endpoint:
                 # Create new client
-
                 try:
                     if auth_method == "azure_ad":
                         token_provider = get_bearer_token_provider(
@@ -138,6 +74,9 @@ class AzureOpenAIProvider(LLMProvider):
                     else:
                         error_msg = f"Unsupported authentication method: {auth_method}"
                         raise ValueError(error_msg)
+
+                    # Track the endpoint we used to create this client
+                    cls._last_endpoint = endpoint
 
                 except Exception as e:
                     return None
@@ -193,15 +132,14 @@ class AzureOpenAIProvider(LLMProvider):
         self,
         prompt: str,
         schema: Dict[str, Any],
-        model: Optional[str] = None,
+        model: str,
+        endpoint: str,
+        api_key: str,
+        api_version: str,
         temperature: float = 0.7,
         max_tokens: int = 2048,
         timeout: float = 8.0,
-        high_tier: bool = False,
-        endpoint: Optional[str] = None,
-        api_key: Optional[str] = None,
-        api_version: Optional[str] = None,
-        auth_method: Optional[str] = None,
+        auth_method: str = "api_key",
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -211,14 +149,13 @@ class AzureOpenAIProvider(LLMProvider):
             prompt: The prompt to send to the model
             schema: JSON schema for the expected response
             model: Specific model to use (required)
+            endpoint: Azure OpenAI endpoint URL (required)
+            api_key: API key (required)
+            api_version: API version (required)
             temperature: Model temperature
             max_tokens: Maximum tokens in the generated response
             timeout: Request timeout in seconds
-            high_tier: Whether to use the high-tier model from config (ignored if model specified)
-            endpoint: Azure OpenAI endpoint URL (required if not in config)
-            api_key: API key (required if auth_method is 'api_key' and not in config)
-            api_version: API version (required if not in config)
-            auth_method: Authentication method ('api_key' or 'azure_ad', defaults to 'api_key')
+            auth_method: Authentication method ('api_key' or 'azure_ad')
             **kwargs: Additional provider-specific arguments
 
         Returns:
@@ -228,10 +165,7 @@ class AzureOpenAIProvider(LLMProvider):
             ValueError: If the response cannot be parsed as valid JSON
             TimeoutError: If the request times out
         """
-        # Use specified model or get from config based on tier
-        model_to_use = model if model else self.get_model_from_config(high_tier)
-
-        # Get client with passed parameters or fall back to config
+        # Get client with all required parameters
         client = self.get_client(endpoint=endpoint, api_key=api_key, api_version=api_version, auth_method=auth_method)
         system_prompt = f"""Provide a response that matches this JSON schema: {json.dumps(schema)}"""
         
@@ -249,7 +183,7 @@ class AzureOpenAIProvider(LLMProvider):
                     stream=False,
                     presence_penalty=0.0,
                     frequency_penalty=0.0,
-                    model=model_to_use,
+                    model=model,
                     response_format={"type": "json_object"}
                 ),
                 timeout=timeout

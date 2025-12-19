@@ -16,16 +16,15 @@ from nlweb_core.protocol.models import AskRequest, ResultObject
 
 class ConversationMessage(BaseModel):
     """
-    A message in a conversation (user query or assistant response).
+    A complete conversation turn (user query + assistant response).
 
-    This model stores the complete context of a message exchange, including
-    the full v0.54 protocol request for user messages and result objects
-    for assistant responses.
+    This model stores both the user's request and the assistant's response
+    in a single record, representing one complete interaction.
     """
 
     message_id: str = Field(
         ...,
-        description="Unique identifier for this message"
+        description="Unique identifier for this message exchange"
     )
 
     conversation_id: str = Field(
@@ -33,32 +32,27 @@ class ConversationMessage(BaseModel):
         description="Identifier linking this message to a conversation"
     )
 
-    role: str = Field(
-        ...,
-        description="Message role: 'user' or 'assistant'"
-    )
-
     timestamp: datetime = Field(
         ...,
-        description="When this message was created"
+        description="When this exchange was created"
     )
 
-    # For user messages - store the complete request
-    request: Optional[AskRequest] = Field(
-        None,
-        description="Full v0.54 AskRequest for user messages"
+    # User's request - the complete v0.54 request
+    request: AskRequest = Field(
+        ...,
+        description="Full v0.54 AskRequest from the user"
     )
 
-    # For assistant messages - store the results
+    # Assistant's response - the result objects returned
     results: Optional[List[ResultObject]] = Field(
         None,
-        description="Result objects returned for assistant messages"
+        description="Result objects returned by the assistant"
     )
 
     # Additional metadata
     metadata: Optional[Dict[str, Any]] = Field(
         None,
-        description="Additional metadata (site, response_format, etc.)"
+        description="Additional metadata (user_id, site, response_format, etc.)"
     )
 
     class Config:

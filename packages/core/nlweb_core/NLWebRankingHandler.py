@@ -53,6 +53,10 @@ class NLWebRankingHandler(NLWebHandler):
         await ranking.do()
 
     async def postResults(self):
-        """Execute post-query processing (map detection, summarization, etc.)."""
+        """Execute post-query processing (summarization, conversation storage, etc.)."""
+        # Run post-query processing (summarization, etc.)
         post_processing = PostQueryProcessing(self)
         await post_processing.do()
+
+        # Save the complete conversation turn to storage
+        await self.save_conversation_turn()

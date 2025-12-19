@@ -18,13 +18,28 @@ class NLWebChat {
         this.init();
     }
 
-    init() {
+    async init() {
         console.log('Initializing NLWeb Chat...');
         this.bindElements();
         this.attachEventListeners();
+        await this.loadConfig();
         this.loadConversations();
         this.updateServerUrlDisplay();
         this.updateUI();
+    }
+
+    async loadConfig() {
+        try {
+            const response = await fetch(`${this.baseUrl}/config`);
+            if (response.ok) {
+                const config = await response.json();
+                window.TEST_USER = config.test_user;
+                console.log('Loaded test user:', window.TEST_USER);
+            }
+        } catch (error) {
+            console.warn('Failed to load config:', error);
+            window.TEST_USER = 'anonymous';
+        }
     }
 
     bindElements() {
@@ -326,7 +341,11 @@ class NLWebChat {
                     mode: mode
                 },
                 meta: {
-                    api_version: '0.54'
+                    api_version: '0.54',
+                    user: {
+                        id: window.TEST_USER || 'anonymous'
+                    },
+                    remember: true
                 }
             };
 

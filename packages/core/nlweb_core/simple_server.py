@@ -10,12 +10,23 @@ Backwards compatibility is not guaranteed at this time.
 
 import json
 import asyncio
+import logging
 from aiohttp import web
 from nlweb_core.NLWebVectorDBRankingHandler import NLWebVectorDBRankingHandler
 from nlweb_core.config import CONFIG
 from nlweb_core.utils import get_param
 from pydantic import ValidationError
-from nlweb_core.protocol import AskRequest, AskResponse, ResponseMeta
+from nlweb_core.protocol import AskRequest, ResponseMeta
+from nlweb_core.protocol.conversation_models import (
+    ListConversationsRequest, GetConversationRequest, DeleteConversationRequest,
+    ListConversationsResponse, GetConversationResponse, DeleteConversationResponse,
+    ConversationSummary, ConversationPreview, ConversationInfo, PaginationResponse,
+    ErrorResponse
+)
+from nlweb_core.conversation.auth import get_authenticated_user_id, validate_conversation_access, validate_session
+from nlweb_core.rate_limiter import get_rate_limiter, shutdown_rate_limiter
+
+logger = logging.getLogger(__name__)
 
 
 async def ask_handler(request):
@@ -40,6 +51,24 @@ async def ask_handler(request):
     - If streaming=false: JSON response with the complete NLWeb answer
     - Otherwise: Server-Sent Events stream
     """
+    # Get request timeout from config (default 120 seconds)
+    timeout_seconds = getattr(CONFIG.server, 'timeout', 120) if hasattr(CONFIG, 'server') else 120
+
+    # Rate limiting
+    rate_limiter = get_rate_limiter(requests_per_minute=60, burst_size=10)
+    client_ip = request.headers.get('X-Forwarded-For', request.remote).split(',')[0].strip()
+    allowed, rate_headers = await rate_limiter.check_rate_limit(client_ip)
+
+    if not allowed:
+        return web.json_response(
+            {
+                "error": "Rate limit exceeded. Please try again later.",
+                "_meta": {"version": "0.54", "response_type": "Error"}
+            },
+            status=429,
+            headers=rate_headers
+        )
+
     try:
         # Get query parameters from URL
         query_params = dict(request.query)
@@ -52,14 +81,7 @@ async def ask_handler(request):
                 query_params = {**query_params, **body}
             except Exception as e:
                 # If body parsing fails, just use query params
-                pass
-
-        # Print the request
-        print(f"\n=== Incoming Request ===")
-        print(f"Method: {request.method}")
-        print(f"Path: {request.path}")
-        print(f"Query params: {query_params}")
-
+                logger.debug(f"No JSON body in POST request (using query params only): {e}")
 
         # Validate required parameters using protocol model 'AskRequest' fields
         ask_request_fields = {
@@ -69,9 +91,7 @@ async def ask_handler(request):
 
         try:
             ask_request = AskRequest(**ask_request_fields)
-            print(f" Request validate: {ask_request.model_dump()}")
         except ValidationError as e:
-                print(f" Validation error: {e}")
                 return web.json_response(
                     {
                         "error": "Invalid request parameters",
@@ -79,19 +99,46 @@ async def ask_handler(request):
                         "_meta": {"version": "0.5"}
                     },
                     status=400
-                )
-        
-        print(f"========================\n")      
+                )      
 
         # Check streaming parameter
         streaming = get_param(query_params, "streaming", bool, True)
 
-        if not streaming:
-            # Non-streaming mode: collect all responses and return JSON
-            return await handle_non_streaming(query_params, ask_request)
-        else:
-            # Streaming mode: use SSE
-            return await handle_streaming(request, query_params, ask_request)
+        # Wrap execution with timeout
+        try:
+            async with asyncio.timeout(timeout_seconds):
+                if not streaming:
+                    # Non-streaming mode: collect all responses and return JSON
+                    return await handle_non_streaming(query_params, ask_request)
+                else:
+                    # Streaming mode: use SSE
+                    return await handle_streaming(request, query_params, ask_request)
+        except asyncio.TimeoutError:
+            logger.error(f"Request timeout after {timeout_seconds}s")
+            if streaming:
+                # For streaming, try to send error event
+                response = web.StreamResponse(
+                    status=504,
+                    reason='Gateway Timeout',
+                    headers={'Content-Type': 'text/event-stream'}
+                )
+                await response.prepare(request)
+                error_data = {
+                    "_meta": {
+                        "version": "0.54",
+                        "nlweb/streaming_status": "error",
+                        "error": f"Request timeout after {timeout_seconds}s"
+                    }
+                }
+                await response.write(f"data: {json.dumps(error_data)}\n\n".encode('utf-8'))
+                await response.write_eof()
+                return response
+            else:
+                # For non-streaming, return JSON error
+                return web.json_response({
+                    "error": "Request timeout",
+                    "_meta": {"version": "0.54", "response_type": "Error"}
+                }, status=504)
 
     except Exception as e:
         return web.json_response(
@@ -201,6 +248,13 @@ async def handle_streaming(request, query_params, ask_request: AskRequest):
 async def health_handler(request):
     """Simple health check endpoint."""
     return web.json_response({"status": "ok"})
+
+
+async def config_handler(request):
+    """Expose client configuration."""
+    return web.json_response({
+        "test_user": CONFIG.test_user
+    })
 
 
 async def mcp_handler(request):
@@ -342,12 +396,303 @@ async def mcp_handler(request):
         }, status=500)
 
 
+async def list_conversations_handler(request):
+    """
+    Handle GET /conversations - List conversations for authenticated user.
+    Uses JSON body with meta.user for authentication.
+    """
+    try:
+        from nlweb_core.conversation.storage import ConversationStorageClient
+
+        # Check if conversation storage is enabled
+        if not hasattr(CONFIG, 'conversation_storage') or not CONFIG.conversation_storage.enabled:
+            return web.json_response({
+                "_meta": {"version": "0.54", "response_type": "Error"},
+                "error": {"code": "SERVICE_UNAVAILABLE", "message": "Conversation storage is not enabled"}
+            }, status=503)
+
+        # Parse JSON body
+        try:
+            body = await request.json()
+            list_request = ListConversationsRequest(**body)
+        except Exception as e:
+            logger.debug(f"Invalid request body: {e}")
+            return web.json_response({
+                "_meta": {"version": "0.54", "response_type": "Error"},
+                "error": {"code": "INVALID_REQUEST", "message": f"Invalid request body: {str(e)}"}
+            }, status=400)
+
+        # Extract and validate user ID
+        user_id = get_authenticated_user_id(list_request.meta)
+        if not user_id:
+            return web.json_response({
+                "_meta": {"version": "0.54", "response_type": "Error"},
+                "error": {"code": "AUTH_REQUIRED", "message": "User authentication required"}
+            }, status=401)
+
+        # TODO: Validate user_id matches authenticated session
+        # if not validate_session(request, user_id):
+        #     return web.json_response({
+        #         "_meta": {"version": "0.54", "response_type": "Error"},
+        #         "error": {"code": "FORBIDDEN", "message": "User not authenticated"}
+        #     }, status=403)
+
+        # Get conversations for this user
+        storage = ConversationStorageClient()
+        conversation_ids = await storage.get_user_conversations(
+            user_id,
+            limit=list_request.pagination.limit
+        )
+
+        # Build conversation summaries
+        conversations = []
+        for conv_id in conversation_ids:
+            try:
+                # Get first message for preview
+                messages = await storage.get_messages(conv_id, limit=1)
+                if messages:
+                    msg = messages[0]
+                    conversations.append(ConversationSummary(
+                        conversation_id=conv_id,
+                        message_count=1,  # TODO: Get actual count
+                        first_message_timestamp=msg.timestamp,
+                        last_message_timestamp=msg.timestamp,
+                        site=msg.metadata.get('site') if msg.metadata else None,
+                        preview=ConversationPreview(
+                            query=msg.request.query.text,
+                            result_count=len(msg.results) if msg.results else 0
+                        )
+                    ))
+            except Exception as e:
+                logger.warning(f"Failed to load conversation {conv_id}: {e}")
+                continue
+
+        # Build response
+        response = ListConversationsResponse(
+            _meta={"version": "0.54", "response_type": "ConversationList"},
+            conversations=conversations,
+            pagination=PaginationResponse(
+                total=len(conversations),
+                limit=list_request.pagination.limit,
+                offset=list_request.pagination.offset,
+                has_more=False  # TODO: Implement proper pagination
+            )
+        )
+
+        return web.json_response(response.model_dump(by_alias=True, mode='json'))
+
+    except Exception as e:
+        logger.error(f"Failed to list conversations: {e}", exc_info=True)
+        return web.json_response({
+            "_meta": {"version": "0.54", "response_type": "Error"},
+            "error": {"code": "INTERNAL_ERROR", "message": "Internal server error"}
+        }, status=500)
+
+
+async def get_conversation_handler(request):
+    """
+    Handle GET /conversations/{id} - Get messages for a specific conversation.
+    Uses JSON body with meta.user for authentication.
+    """
+    try:
+        from nlweb_core.conversation.storage import ConversationStorageClient
+
+        # Check if conversation storage is enabled
+        if not hasattr(CONFIG, 'conversation_storage') or not CONFIG.conversation_storage.enabled:
+            return web.json_response({
+                "_meta": {"version": "0.54", "response_type": "Error"},
+                "error": {"code": "SERVICE_UNAVAILABLE", "message": "Conversation storage is not enabled"}
+            }, status=503)
+
+        # Get conversation ID from path
+        conversation_id = request.match_info.get('id')
+        if not conversation_id:
+            return web.json_response({
+                "_meta": {"version": "0.54", "response_type": "Error"},
+                "error": {"code": "INVALID_REQUEST", "message": "Conversation ID required"}
+            }, status=400)
+
+        # Parse JSON body
+        try:
+            body = await request.json()
+            get_request = GetConversationRequest(**body)
+        except Exception as e:
+            logger.debug(f"Invalid request body: {e}")
+            return web.json_response({
+                "_meta": {"version": "0.54", "response_type": "Error"},
+                "error": {"code": "INVALID_REQUEST", "message": f"Invalid request body: {str(e)}"}
+            }, status=400)
+
+        # Extract and validate user ID
+        user_id = get_authenticated_user_id(get_request.meta)
+        if not user_id:
+            return web.json_response({
+                "_meta": {"version": "0.54", "response_type": "Error"},
+                "error": {"code": "AUTH_REQUIRED", "message": "User authentication required"}
+            }, status=401)
+
+        # Initialize storage and validate access
+        storage = ConversationStorageClient()
+
+        # Validate user owns this conversation
+        has_access = await validate_conversation_access(conversation_id, user_id, storage)
+        if not has_access:
+            # Return 404 instead of 403 to avoid information disclosure
+            return web.json_response({
+                "_meta": {"version": "0.54", "response_type": "Error"},
+                "error": {"code": "NOT_FOUND", "message": "Conversation not found"}
+            }, status=404)
+
+        # Get messages
+        messages = await storage.get_messages(
+            conversation_id,
+            limit=get_request.pagination.limit
+        )
+
+        if not messages:
+            return web.json_response({
+                "_meta": {"version": "0.54", "response_type": "Error"},
+                "error": {"code": "NOT_FOUND", "message": "Conversation not found"}
+            }, status=404)
+
+        # Build conversation info
+        first_msg = messages[0]
+        last_msg = messages[-1]
+
+        conversation_info = ConversationInfo(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            created_at=first_msg.timestamp,
+            updated_at=last_msg.timestamp
+        )
+
+        # Build response
+        response = GetConversationResponse(
+            _meta={"version": "0.54", "response_type": "ConversationMessages"},
+            conversation=conversation_info,
+            messages=messages,
+            pagination=PaginationResponse(
+                total=len(messages),
+                limit=get_request.pagination.limit,
+                offset=get_request.pagination.offset,
+                has_more=False  # TODO: Implement proper pagination
+            )
+        )
+
+        return web.json_response(response.model_dump(by_alias=True, mode='json'))
+
+    except Exception as e:
+        logger.error(f"Failed to get conversation: {e}", exc_info=True)
+        return web.json_response({
+            "_meta": {"version": "0.54", "response_type": "Error"},
+            "error": {"code": "INTERNAL_ERROR", "message": "Internal server error"}
+        }, status=500)
+
+
+async def delete_conversation_handler(request):
+    """
+    Handle DELETE /conversations/{id} - Delete a conversation.
+    Uses JSON body with meta.user for authentication.
+    """
+    try:
+        from nlweb_core.conversation.storage import ConversationStorageClient
+
+        # Check if conversation storage is enabled
+        if not hasattr(CONFIG, 'conversation_storage') or not CONFIG.conversation_storage.enabled:
+            return web.json_response({
+                "_meta": {"version": "0.54", "response_type": "Error"},
+                "error": {"code": "SERVICE_UNAVAILABLE", "message": "Conversation storage is not enabled"}
+            }, status=503)
+
+        # Get conversation ID from path
+        conversation_id = request.match_info.get('id')
+        if not conversation_id:
+            return web.json_response({
+                "_meta": {"version": "0.54", "response_type": "Error"},
+                "error": {"code": "INVALID_REQUEST", "message": "Conversation ID required"}
+            }, status=400)
+
+        # Parse JSON body
+        try:
+            body = await request.json()
+            delete_request = DeleteConversationRequest(**body)
+        except Exception as e:
+            logger.debug(f"Invalid request body: {e}")
+            return web.json_response({
+                "_meta": {"version": "0.54", "response_type": "Error"},
+                "error": {"code": "INVALID_REQUEST", "message": f"Invalid request body: {str(e)}"}
+            }, status=400)
+
+        # Extract and validate user ID
+        user_id = get_authenticated_user_id(delete_request.meta)
+        if not user_id:
+            return web.json_response({
+                "_meta": {"version": "0.54", "response_type": "Error"},
+                "error": {"code": "AUTH_REQUIRED", "message": "User authentication required"}
+            }, status=401)
+
+        # Initialize storage and validate access
+        storage = ConversationStorageClient()
+
+        # Validate user owns this conversation
+        has_access = await validate_conversation_access(conversation_id, user_id, storage)
+        if not has_access:
+            # Return 404 instead of 403 to avoid information disclosure
+            return web.json_response({
+                "_meta": {"version": "0.54", "response_type": "Error"},
+                "error": {"code": "NOT_FOUND", "message": "Conversation not found"}
+            }, status=404)
+
+        # Count messages before deletion
+        messages = await storage.get_messages(conversation_id)
+        messages_count = len(messages)
+
+        # Delete conversation
+        await storage.delete_conversation(conversation_id)
+
+        # Build response
+        response = DeleteConversationResponse(
+            _meta={"version": "0.54", "response_type": "ConversationDeleted"},
+            conversation_id=conversation_id,
+            status="deleted",
+            messages_deleted=messages_count
+        )
+
+        return web.json_response(response.model_dump(by_alias=True, mode='json'))
+
+    except Exception as e:
+        logger.error(f"Failed to delete conversation: {e}", exc_info=True)
+        return web.json_response({
+            "_meta": {"version": "0.54", "response_type": "Error"},
+            "error": {"code": "INTERNAL_ERROR", "message": "Internal server error"}
+        }, status=500)
+
+
 async def conversations_handler(request):
     """
-    Handle conversation-related requests:
-    - GET /conversations - List conversations for a user
-    - GET /conversations/{id} - Get messages for a conversation
-    - DELETE /conversations/{id} - Delete a conversation
+    Route conversation requests to appropriate handler.
+
+    Backward compatibility wrapper that routes to new JSON-based handlers.
+    """
+    conversation_id = request.match_info.get('id')
+
+    if request.method == 'DELETE' and conversation_id:
+        return await delete_conversation_handler(request)
+    elif request.method == 'GET' and conversation_id:
+        return await get_conversation_handler(request)
+    elif request.method == 'GET':
+        return await list_conversations_handler(request)
+    else:
+        return web.json_response({
+            "_meta": {"version": "0.54", "response_type": "Error"},
+            "error": {"code": "METHOD_NOT_ALLOWED", "message": "Method not allowed"}
+        }, status=405)
+
+
+async def legacy_conversations_handler(request):
+    """
+    DEPRECATED: Old query-string based conversation handler.
+    Kept for backward compatibility during transition.
     """
     try:
         from nlweb_core.conversation.storage import ConversationStorageClient
@@ -408,20 +753,68 @@ async def conversations_handler(request):
             )
 
     except Exception as e:
+        logger.error(f"Legacy conversation handler error: {e}", exc_info=True)
         return web.json_response(
             {"error": str(e)},
             status=500
         )
 
 
+async def init_app(app):
+    """Initialize resources on startup."""
+    # Configure logging with request ID tracking
+    from nlweb_core.request_context import configure_logging_with_request_id
+    configure_logging_with_request_id()
+    logger.info("Request ID tracking configured for logging")
+
+    # Initialize conversation storage on startup if enabled
+    if hasattr(CONFIG, 'conversation_storage') and CONFIG.conversation_storage.enabled:
+        try:
+            from nlweb_core.conversation.storage import ConversationStorageClient
+            storage = ConversationStorageClient(CONFIG.conversation_storage)
+
+            # Initialize pool and schema on startup to avoid first-request latency
+            await storage.backend.initialize()
+
+            app['conversation_storage'] = storage
+            # Also set in CONFIG so handlers can access it
+            CONFIG.conversation_storage_client = storage
+            logger.info("Conversation storage initialized on startup")
+        except Exception as e:
+            logger.warning(f"Failed to initialize conversation storage: {e}")
+
+
+async def cleanup_app(app):
+    """Cleanup resources on shutdown."""
+    # Close conversation storage connections
+    if 'conversation_storage' in app:
+        try:
+            await app['conversation_storage'].backend.close()
+            logger.info("Conversation storage closed")
+        except Exception as e:
+            logger.error(f"Error closing conversation storage: {e}")
+
+    # Shutdown rate limiter
+    try:
+        await shutdown_rate_limiter()
+        logger.info("Rate limiter shutdown")
+    except Exception as e:
+        logger.error(f"Error shutting down rate limiter: {e}")
+
+
 def create_app():
     """Create and configure the aiohttp application."""
     app = web.Application()
+
+    # Add startup and cleanup hooks
+    app.on_startup.append(init_app)
+    app.on_cleanup.append(cleanup_app)
 
     # Add routes - support both GET and POST for /ask
     app.router.add_get('/ask', ask_handler)
     app.router.add_post('/ask', ask_handler)
     app.router.add_get('/health', health_handler)
+    app.router.add_get('/config', config_handler)
 
     # Conversation management endpoints
     app.router.add_get('/conversations', conversations_handler)
@@ -466,6 +859,29 @@ def main():
 
     print(f"Starting NLWeb server on http://{host}:{port}")
     print(f" Using protocol validation from nlweb_core.protocol")
+
+    # Print LLM configuration for debugging
+    print(f"\n=== LLM Configuration ===")
+    if hasattr(CONFIG, 'scoring_llm_model') and CONFIG.scoring_llm_model:
+        print(f"Scoring LLM Model:")
+        print(f"  model: {CONFIG.scoring_llm_model.model}")
+        print(f"  endpoint: {CONFIG.scoring_llm_model.endpoint}")
+        print(f"  api_version: {CONFIG.scoring_llm_model.api_version}")
+        print(f"  api_key: {'SET' if CONFIG.scoring_llm_model.api_key else 'NOT SET'}")
+    if hasattr(CONFIG, 'high_llm_model') and CONFIG.high_llm_model:
+        print(f"High LLM Model:")
+        print(f"  model: {CONFIG.high_llm_model.model}")
+        print(f"  endpoint: {CONFIG.high_llm_model.endpoint}")
+        print(f"  api_version: {CONFIG.high_llm_model.api_version}")
+        print(f"  api_key: {'SET' if CONFIG.high_llm_model.api_key else 'NOT SET'}")
+    if hasattr(CONFIG, 'low_llm_model') and CONFIG.low_llm_model:
+        print(f"Low LLM Model:")
+        print(f"  model: {CONFIG.low_llm_model.model}")
+        print(f"  endpoint: {CONFIG.low_llm_model.endpoint}")
+        print(f"  api_version: {CONFIG.low_llm_model.api_version}")
+        print(f"  api_key: {'SET' if CONFIG.low_llm_model.api_key else 'NOT SET'}")
+    print(f"========================\n")
+
     print(f"\nEndpoints:")
     print(f"  - GET/POST /ask")
     print(f"    Protocol parameters (validated):")

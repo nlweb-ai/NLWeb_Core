@@ -16,7 +16,15 @@ Backwards compatibility is not guaranteed at this time.
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any
 from nlweb_core.config import CONFIG
+from nlweb_core.llm_exceptions import (
+    LLMError, LLMTimeoutError, LLMAuthenticationError,
+    LLMRateLimitError, LLMConnectionError, LLMInvalidRequestError,
+    LLMProviderError, classify_llm_error
+)
 import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class LLMProvider(ABC):
@@ -213,9 +221,14 @@ async def ask_llm(
         except ValueError as e:
             return {}
 
-        print("ABOUT TO CALL", provider_instance, model_id)
-        print("LEVEL", level)
-        print("MODEL CONFIG", model_config)
+        logger.debug(f"Calling LLM provider {provider_instance} with model {model_id} at level {level}")
+        logger.debug(f"Model config: {model_config}")
+
+        # Extract values from model config
+        endpoint_val = model_config.endpoint if hasattr(model_config, "endpoint") else None
+        api_version_val = model_config.api_version if hasattr(model_config, "api_version") else None
+        api_key_val = model_config.api_key if hasattr(model_config, "api_key") else None
+
         # Simply call the provider's get_completion method, passing all config parameters
         # Each provider should handle thread-safety internally
         result = await asyncio.wait_for(
@@ -225,17 +238,9 @@ async def ask_llm(
                 model=model_id,
                 timeout=timeout,
                 max_tokens=max_length,
-                endpoint=(
-                    model_config.endpoint if hasattr(model_config, "endpoint") else None
-                ),
-                api_key=(
-                    model_config.api_key if hasattr(model_config, "api_key") else None
-                ),
-                api_version=(
-                    model_config.api_version
-                    if hasattr(model_config, "api_version")
-                    else None
-                ),
+                endpoint=endpoint_val,
+                api_key=api_key_val,
+                api_version=api_version_val,
                 auth_method=(
                     model_config.auth_method
                     if hasattr(model_config, "auth_method")
@@ -247,13 +252,16 @@ async def ask_llm(
         )
         return result
 
-    except asyncio.TimeoutError:
-        return {}
-    except Exception as e:
-        import traceback
+    except asyncio.TimeoutError as e:
+        # Timeout is a specific, well-known error - raise it directly
+        logger.error(f"LLM request timed out after {timeout}s", exc_info=True)
+        raise LLMTimeoutError(f"LLM request timed out after {timeout}s") from e
 
-        traceback.print_exc()
-        return {}
+    except Exception as e:
+        # Classify the error and raise appropriate exception
+        logger.error(f"LLM request failed: {e}", exc_info=True)
+        classified_error = classify_llm_error(e)
+        raise classified_error from e
 
 
 def get_available_providers() -> list:

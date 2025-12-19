@@ -12,7 +12,6 @@ import json
 import httpx
 from typing import List, Dict, Union, Optional, Any, Tuple
 
-from nlweb_core.config import CONFIG
 from nlweb_core.retriever import VectorDBClientInterface
 from nlweb_core.embedding import get_embedding
 
@@ -25,65 +24,44 @@ class ConfigurationError(RuntimeError):
 class SnowflakeCortexClient(VectorDBClientInterface):
     """
     Client for Snowflake Cortex Search operations.
-    
+
     This client provides read-only access to Snowflake Cortex Search Services,
     which combine vector similarity search with traditional keyword search.
-    
+
     Note: Data ingestion is not supported. Data must be loaded into Snowflake
     using native tools (COPY INTO, Snowpipe, etc.) before creating the search service.
     """
 
-    def __init__(self, endpoint_name: Optional[str] = None):
+    def __init__(self, endpoint_config):
         """
         Initialize the Snowflake Cortex Search client.
 
         Args:
-            endpoint_name: Name of the endpoint to use (defaults to preferred endpoint in CONFIG)
+            endpoint_config: Endpoint configuration object with api_endpoint, api_key, index_name, etc.
         """
         super().__init__()
-        self.endpoint_name = endpoint_name or CONFIG.write_endpoint
-        
-        # Get endpoint configuration
-        self.endpoint_config = self._get_endpoint_config()
-        
+        self.endpoint_config = endpoint_config
+
         # Get connection parameters
         self.account_url = self._get_account_url()
         self.pat = self._get_pat()
-        
+
         # Parse the search service name (database.schema.service)
         self.database, self.schema, self.service = self._parse_service_name()
 
-    def _get_endpoint_config(self):
-        """Get the Snowflake endpoint configuration from CONFIG"""
-        endpoint_config = CONFIG.retrieval_endpoints.get(self.endpoint_name)
-        
-        if not endpoint_config:
-            raise ValueError(f"No configuration found for endpoint {self.endpoint_name}")
-        
-        # Verify this is a Snowflake Cortex Search endpoint
-        if endpoint_config.db_type != "snowflake_cortex_search":
-            raise ValueError(
-                f"Endpoint {self.endpoint_name} is not a Snowflake Cortex Search endpoint "
-                f"(type: {endpoint_config.db_type})"
-            )
-        
-        return endpoint_config
-
     def _get_account_url(self) -> str:
         """Get the Snowflake account URL from configuration"""
-        if not self.endpoint_config.api_endpoint:
+        if not hasattr(self.endpoint_config, 'api_endpoint') or not self.endpoint_config.api_endpoint:
             raise ConfigurationError(
-                f"api_endpoint is not configured for endpoint {self.endpoint_name}. "
-                "Set SNOWFLAKE_ACCOUNT_URL in your environment."
+                "api_endpoint is not configured. Set SNOWFLAKE_ACCOUNT_URL in your environment."
             )
         return self.endpoint_config.api_endpoint.strip('"')
 
     def _get_pat(self) -> str:
         """Get the Programmatic Access Token from configuration"""
-        if not self.endpoint_config.api_key:
+        if not hasattr(self.endpoint_config, 'api_key') or not self.endpoint_config.api_key:
             raise ConfigurationError(
-                f"api_key is not configured for endpoint {self.endpoint_name}. "
-                "Set SNOWFLAKE_PAT in your environment."
+                "api_key is not configured. Set SNOWFLAKE_PAT in your environment."
             )
         return self.endpoint_config.api_key.strip('"')
 

@@ -1,6 +1,9 @@
 #!/bin/bash
 # Startup script for Azure Web App
 
+# Set PostgreSQL connection string
+export POSTGRES_CONNECTION_STRING="postgresql://nlwebadmin:NLWeb2025!SecurePass@nlweb-postgres.postgres.database.azure.com:5432/conversations?sslmode=require"
+
 # Install all dependencies from PyPI
 pip install -r requirements.txt
 

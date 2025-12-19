@@ -62,10 +62,6 @@ scoring-llm-model:
 
 # Conversation storage configuration
 conversation_storage:
-  type: cosmos
+  type: postgres
   enabled: true
-  endpoint_env: AZURE_COSMOS_ENDPOINT
-  api_key_env: AZURE_COSMOS_API_KEY
-  database_name: nlweb
-  container_name: conversations
-  partition_key: /conversation_id
+  connection_string_env: POSTGRES_CONNECTION_STRING
