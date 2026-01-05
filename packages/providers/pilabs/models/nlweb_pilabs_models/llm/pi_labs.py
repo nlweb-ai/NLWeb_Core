@@ -1,4 +1,5 @@
 import asyncio
+import os
 import threading
 from typing import Any
 import httpx
@@ -12,10 +13,8 @@ class PiLabsClient:
     It lazily initializes the client it will use to make requests."""
 
     _client: httpx.AsyncClient
-    _url: str
 
-    def __init__(self, url: str = "http://localhost:8001/invocations"):
-        self._url = url
+    def __init__(self):
         self._client = httpx.AsyncClient(
             http2=True,
             limits=httpx.Limits(max_connections=100, max_keepalive_connections=30),
@@ -26,10 +25,16 @@ class PiLabsClient:
         llm_input: str,
         llm_output: str,
         scoring_spec: list[dict[str, Any]],
+        endpoint: str,
+        api_key: str,
         timeout: float = 30.0,
     ) -> float:
+        if not endpoint.endswith("/"):
+            endpoint += "/"
+        url = f"{endpoint}invocations"
         resp = await self._client.post(
-            url=self._url,
+            url=url,
+            headers={"Authorization": f"Bearer {api_key}"},
             json={
                 "llm_input": llm_input,
                 "llm_output": llm_output,
@@ -62,6 +67,8 @@ class PiLabsProvider(LLMProvider):
         temperature: float = 0,
         max_tokens: int = 0,
         timeout: float = 30.0,
+        api_key: str = "",
+        endpoint: str = "",
         **kwargs,
     ) -> dict[str, Any]:
         if schema.keys() != {"score", "description"}:
@@ -72,14 +79,20 @@ class PiLabsProvider(LLMProvider):
             raise ValueError(
                 "PiLabsProvider requires 'request.query', 'site.itemType', and 'item.description' in kwargs."
             )
+        if not api_key or not endpoint:
+            raise ValueError(
+                "PiLabsProvider requires 'api_key' and 'endpoint' parameters."
+            )
         client = self.get_client()
         score = await client.score(
-            llm_input=kwargs["request.query"].text,
+            llm_input=kwargs["request.query"],
             llm_output=json.dumps(kwargs["item.description"]),
             scoring_spec=[
                 {"question": "Is this item relevant to the query?"},
             ],
             timeout=timeout,
+            api_key=api_key,
+            endpoint=endpoint,
         )
         return {"score": score, "description": kwargs["item.description"]}
 
@@ -134,6 +147,8 @@ async def process_item(item, client):
         scoring_spec=[
             {"question": "Is the item relevant to the query?"},
         ],
+        endpoint=os.environ.get("PI_LABS_ENDPOINT", ""),
+        api_key=os.environ.get("PI_LABS_KEY", ""),
     )
     score = item_fields["score"]
 
