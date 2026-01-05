@@ -9,9 +9,12 @@ Backwards compatibility is not guaranteed at this time.
 """
 
 from nlweb_core.utils import trim_json, fill_prompt_variables
-from nlweb_core.llm import ask_llm
+from nlweb_core.llm import ask_llm_parallel
 from nlweb_core.llm_exceptions import (
-    LLMError, LLMTimeoutError, LLMRateLimitError, LLMConnectionError
+    LLMError,
+    LLMTimeoutError,
+    LLMRateLimitError,
+    LLMConnectionError,
 )
 import asyncio
 import json
@@ -209,7 +212,10 @@ The user's question is: {request.query}. The item's description is {item.descrip
 
     def get_ranking_prompt(self):
         # Use default ranking prompt
-        return self.RANKING_PROMPT[0], self.RANKING_PROMPT[1]
+        return self.RANKING_PROMPT[0]
+
+    def get_answer_schema(self):
+        return self.RANKING_PROMPT[1]
 
     def __init__(self, handler, items, level="low"):
         self.handler = handler
@@ -219,118 +225,81 @@ The user's question is: {request.query}. The item's description is {item.descrip
         self.rankedAnswers = []
         self._send_lock = asyncio.Lock()  # Prevent race condition in concurrent sends
 
-    async def rankItem(self, url, json_str, name, site):
-        try:
-            prompt_str, ans_struc = self.get_ranking_prompt()
-            description = trim_json(json_str)
+    def build_item_prompt(self, json_str: str) -> tuple[str, dict]:
+        """Build a ranking prompt for a single item."""
+        prompt_str = self.get_ranking_prompt()
+        description = trim_json(json_str)
+        kwargs = {
+            "request.query": self.handler.query.text,
+            "site.itemType": (
+                "item"
+            ),  # Default to "item" if not specified in query_params later
+            "item.description": description,
+            **self.handler.query_params,
+        }
 
-            # Populate the missing keys needed by the prompt template
-            # The prompt template uses {request.query} and {site.itemType}
-            self.handler.query_params["request.query"] = self.handler.query.text
-            self.handler.query_params["site.itemType"] = (
-                "item"  # Default to "item" if not specified
-            )
-            self.handler.query_params["item.description"] = description
+        prompt = fill_prompt_variables(prompt_str, kwargs)
+        return prompt, kwargs
 
-            prompt = fill_prompt_variables(
-                prompt_str, self.handler.query_params, {"item.description": description}
-            )
-            # Use 'scoring' level for ranking tasks
-            ranking = await ask_llm(
-                prompt,
-                ans_struc,
-                level="scoring",
-                query_params=self.handler.query_params,
-            )
+    def process_ranking_result(
+        self, url: str, json_str: str | dict, name: str, site: str, ranking: dict
+    ):
+        """Process a single ranking result and create the result structure."""
+        # Handle both string and dictionary inputs for json_str
+        schema_object = json_str if isinstance(json_str, dict) else json.loads(json_str)
 
-            # Handle both string and dictionary inputs for json_str
-            schema_object = (
-                json_str if isinstance(json_str, dict) else json.loads(json_str)
-            )
+        # If schema_object is an array, set it to the first item
+        if isinstance(schema_object, list) and len(schema_object) > 0:
+            schema_object = schema_object[0]
 
-            # If schema_object is an array, set it to the first item
-            if isinstance(schema_object, list) and len(schema_object) > 0:
-                schema_object = schema_object[0]
+        # Create the final result structure
+        # Start with basic fields
+        result = {
+            "@type": schema_object.get("@type", "Item"),
+            "url": url,
+            "name": name,
+            "site": site,
+            "score": ranking.get("score", 0),
+            "description": ranking.get("description", ""),
+            "sent": False,
+        }
 
-            # Create the final result structure
-            # Start with basic fields
-            result = {
-                "@type": schema_object.get("@type", "Item"),
-                "url": url,
-                "name": name,
-                "site": site,
-                "score": ranking.get("score", 0),
-                "description": ranking.get("description", ""),
-                "sent": False,
-            }
+        # Add all attributes from schema_object except url
+        for key, value in schema_object.items():
+            if key != "url":
+                result[key] = value
 
-            # Add all attributes from schema_object except url
-            for key, value in schema_object.items():
-                if key != "url":
-                    result[key] = value
+        # Add grounding with the url or @id from schema_object
+        grounding_url = schema_object.get("url") or schema_object.get("@id")
+        if grounding_url:
+            result["grounding"] = {"source_urls": [grounding_url]}
 
-            # Add grounding with the url or @id from schema_object
-            grounding_url = schema_object.get("url") or schema_object.get("@id")
-            if grounding_url:
-                result["grounding"] = {
-                    "source_urls": [grounding_url]
-                }
+        return result
 
-            # Add to ranked answers
-            self.rankedAnswers.append(result)
-
-            # Send immediately if score is high enough
-            if result["score"] > self.EARLY_SEND_THRESHOLD:
-                try:
-                    if not self.handler.connection_alive_event.is_set():
-                        return
-
-                    # Wait for pre checks to be done
-                    await self.handler.pre_checks_done_event.wait()
-
-                    # Get max_results from handler
-                    max_results = self.handler.get_param(
-                        "max_results", int, self.NUM_RESULTS_TO_SEND
-                    )
-
-                    # ATOMIC: Check and send with lock to prevent race condition
-                    async with self._send_lock:
-                        if self.num_results_sent < max_results:
-                            await self.handler.send_results([result])
-                            result["sent"] = True
-                            self.num_results_sent += 1
-
-                except (BrokenPipeError, ConnectionResetError):
-                    self.handler.connection_alive_event.clear()
+    async def send_high_score_result(self, result):
+        """Send a high-scoring result immediately."""
+        if result["score"] > self.EARLY_SEND_THRESHOLD:
+            try:
+                if not self.handler.connection_alive_event.is_set():
                     return
 
-        except LLMTimeoutError as e:
-            # Timeout is expected occasionally - log at warning level
-            logger.warning(f"LLM timeout ranking {url}: {e}")
-            # Don't fail the whole ranking - just skip this item
+                # Wait for pre checks to be done
+                await self.handler.pre_checks_done_event.wait()
 
-        except LLMRateLimitError as e:
-            # Rate limit - log and skip, might want to implement backoff in future
-            logger.warning(f"LLM rate limit hit ranking {url}: {e}")
+                # Get max_results from handler
+                max_results = self.handler.get_param(
+                    "max_results", int, self.NUM_RESULTS_TO_SEND
+                )
 
-        except LLMConnectionError as e:
-            # Connection issues - transient, log and skip
-            logger.warning(f"LLM connection error ranking {url}: {e}")
+                # ATOMIC: Check and send with lock to prevent race condition
+                async with self._send_lock:
+                    if self.num_results_sent < max_results:
+                        await self.handler.send_results([result])
+                        result["sent"] = True
+                        self.num_results_sent += 1
 
-        except LLMError as e:
-            # Other LLM errors - log at error level
-            logger.error(f"LLM error ranking {url}: {e}", exc_info=True)
-            # Import here to avoid circular import
-            from nlweb_core.config import CONFIG
-            if CONFIG.should_raise_exceptions():
-                raise  # Re-raise in testing/development mode
-
-        except Exception as e:
-            # Non-LLM errors - log and potentially re-raise
-            logger.error(f"Ranking failed for {url}: {e}", exc_info=True)
-            from nlweb_core.config import CONFIG
-            if CONFIG.should_raise_exceptions():
-                raise  # Re-raise in testing/development mode
+            except (BrokenPipeError, ConnectionResetError):
+                self.handler.connection_alive_event.clear()
 
     async def sendRemainingAnswers(self, answers):
         """Send remaining answers that weren't sent early."""
@@ -375,19 +344,63 @@ The user's question is: {request.query}. The item's description is {item.descrip
                 self.handler.connection_alive_event.clear()
 
     async def do(self):
-        tasks = []
-        for url, json_str, name, site in self.items:
-            if (
-                self.handler.connection_alive_event.is_set()
-            ):  # Only add new tasks if connection is still alive
-                tasks.append(
-                    asyncio.create_task(self.rankItem(url, json_str, name, site))
-                )
-
-        try:
-            await asyncio.gather(*tasks, return_exceptions=True)
-        except Exception as e:
+        if not self.handler.connection_alive_event.is_set():
             return
+
+        # Build prompts for all items
+        prompts = []
+        kwargs_list = []
+        prompt_metadata = []  # Store (url, json_str, name, site) for each prompt
+        ans_struc = self.get_answer_schema()
+
+        for url, json_str, name, site in self.items:
+            prompt, kwargs = self.build_item_prompt(json_str)
+            prompts.append(prompt)
+            kwargs_list.append(kwargs)
+            prompt_metadata.append((url, json_str, name, site))
+
+        if not prompts:
+            return
+        try:
+            # Get all rankings in parallel using get_completions
+            rankings = await ask_llm_parallel(
+                prompts,
+                ans_struc,
+                level="scoring",
+                query_params_list=kwargs_list,
+            )
+        except Exception as e:
+            logger.error(f"Ranking failed: {e}", exc_info=True)
+            raise
+
+        # Process results
+        for ranking, (url, json_str, name, site) in zip(rankings, prompt_metadata):
+
+            # Handle exceptions from get_completions
+            if isinstance(ranking, Exception):
+                if isinstance(ranking, LLMTimeoutError):
+                    logger.warning(f"LLM timeout ranking {url}: {ranking}")
+                elif isinstance(ranking, LLMRateLimitError):
+                    logger.warning(f"LLM rate limit hit ranking {url}: {ranking}")
+                elif isinstance(ranking, LLMConnectionError):
+                    logger.warning(f"LLM connection error ranking {url}: {ranking}")
+                elif isinstance(ranking, LLMError):
+                    logger.error(f"LLM error ranking {url}: {ranking}", exc_info=True)
+                    from nlweb_core.config import CONFIG
+
+                    if CONFIG.should_raise_exceptions():
+                        raise ranking
+                else:
+                    logger.error(f"Ranking failed for {url}: {ranking}", exc_info=True)
+                    from nlweb_core.config import CONFIG
+
+                    if CONFIG.should_raise_exceptions():
+                        raise ranking
+                continue
+
+            result = self.process_ranking_result(url, json_str, name, site, ranking)
+            self.rankedAnswers.append(result)
+            await self.send_high_score_result(result)
 
         if not self.handler.connection_alive_event.is_set():
             return
