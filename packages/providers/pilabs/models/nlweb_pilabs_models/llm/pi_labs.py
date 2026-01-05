@@ -2,10 +2,18 @@ import asyncio
 import os
 import threading
 from typing import Any
+from dataclasses import dataclass
 import httpx
 import json
 
 from nlweb_core.llm import LLMProvider
+
+
+@dataclass
+class PiLabsRequest:
+    llm_input: str
+    llm_output: str
+    scoring_spec: list[dict[str, Any]]
 
 
 class PiLabsClient:
@@ -22,28 +30,29 @@ class PiLabsClient:
 
     async def score(
         self,
-        llm_input: str,
-        llm_output: str,
-        scoring_spec: list[dict[str, Any]],
+        reqs: list[PiLabsRequest],
         endpoint: str,
         api_key: str,
         timeout: float = 30.0,
-    ) -> float:
+    ) -> list[float]:
         if not endpoint.endswith("/"):
             endpoint += "/"
         url = f"{endpoint}invocations"
         resp = await self._client.post(
             url=url,
             headers={"Authorization": f"Bearer {api_key}"},
-            json={
-                "llm_input": llm_input,
-                "llm_output": llm_output,
-                "scoring_spec": scoring_spec,
-            },
+            json=[
+                {
+                    "llm_input": r.llm_input,
+                    "llm_output": r.llm_output,
+                    "scoring_spec": r.scoring_spec,
+                }
+                for r in reqs
+            ],
             timeout=timeout,
         )
         resp.raise_for_status()
-        return resp.json().get("total_score", 0) * 100
+        return [r.get("total_score", 0) * 100 for r in resp.json()]
 
 
 class PiLabsProvider(LLMProvider):
@@ -59,6 +68,57 @@ class PiLabsProvider(LLMProvider):
                 cls._client = PiLabsClient()
         return cls._client
 
+    async def get_completions(
+        self,
+        prompts: list[str],
+        schema: dict[str, Any],
+        kwargs_list: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        temperature: float = 0,
+        max_tokens: int = 0,
+        timeout: float = 30.0,
+        api_key: str = "",
+        endpoint: str = "",
+        **kwargs,
+    ) -> list[dict[str, Any]]:
+        if schema.keys() != {"score", "description"}:
+            raise ValueError(
+                "PiLabsProvider only supports schema with 'score' and 'description' fields."
+            )
+        if kwargs_list is None or len(prompts) != len(kwargs_list):
+            raise ValueError(
+                "PiLabsProvider requires kwargs_list with the same length as prompts."
+            )
+        for kwargs in kwargs_list or []:
+            if {"request.query", "site.itemType", "item.description"} - kwargs.keys():
+                raise ValueError(
+                    "PiLabsProvider requires 'request.query', 'site.itemType', and 'item.description' in kwargs."
+                )
+        if not api_key or not endpoint:
+            raise ValueError(
+                "PiLabsProvider requires 'api_key' and 'endpoint' parameters."
+            )
+        client = self.get_client()
+        scores = await client.score(
+            [
+                PiLabsRequest(
+                    llm_input=kwargs["request.query"],
+                    llm_output=json.dumps(kwargs["item.description"]),
+                    scoring_spec=[
+                        {"question": "Is this item relevant to the query?"},
+                    ],
+                )
+                for kwargs in kwargs_list
+            ],
+            timeout=timeout,
+            api_key=api_key,
+            endpoint=endpoint,
+        )
+        return [
+            {"score": score, "description": kwargs["item.description"]}
+            for score, kwargs in zip(scores, kwargs_list)
+        ]
+
     async def get_completion(
         self,
         prompt: str,
@@ -71,30 +131,18 @@ class PiLabsProvider(LLMProvider):
         endpoint: str = "",
         **kwargs,
     ) -> dict[str, Any]:
-        if schema.keys() != {"score", "description"}:
-            raise ValueError(
-                "PiLabsProvider only supports schema with 'score' and 'description' fields."
-            )
-        if {"request.query", "site.itemType", "item.description"} - kwargs.keys():
-            raise ValueError(
-                "PiLabsProvider requires 'request.query', 'site.itemType', and 'item.description' in kwargs."
-            )
-        if not api_key or not endpoint:
-            raise ValueError(
-                "PiLabsProvider requires 'api_key' and 'endpoint' parameters."
-            )
-        client = self.get_client()
-        score = await client.score(
-            llm_input=kwargs["request.query"],
-            llm_output=json.dumps(kwargs["item.description"]),
-            scoring_spec=[
-                {"question": "Is this item relevant to the query?"},
-            ],
+        resp = await self.get_completions(
+            prompts=[prompt],
+            schema=schema,
+            kwargs_list=[kwargs],
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
             timeout=timeout,
             api_key=api_key,
             endpoint=endpoint,
         )
-        return {"score": score, "description": kwargs["item.description"]}
+        return resp[0]
 
     @classmethod
     def clean_response(cls, content: str) -> dict[str, Any]:
