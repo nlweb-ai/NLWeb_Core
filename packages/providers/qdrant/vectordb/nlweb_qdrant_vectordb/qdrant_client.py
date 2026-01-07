@@ -100,7 +100,8 @@ class QdrantVectorClient(VectorDBClientInterface):
         Returns:
             AsyncQdrantClient: Qdrant client instance
         """
-        client_key = self.endpoint_name
+        # Use endpoint URL or database path as the cache key
+        client_key = self.api_endpoint or self.database_path or "default"
 
         # First check if we already have a client
         with self._client_lock:
